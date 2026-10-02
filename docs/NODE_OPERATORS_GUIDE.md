@@ -20,6 +20,7 @@ Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provide
 10. [Downtime Handling & Graceful Shutdown](#10-downtime-handling--graceful-shutdown)
 11. [Backup & Disaster Recovery](#11-backup--disaster-recovery)
 12. [Troubleshooting & Common Errors](#12-troubleshooting--common-errors)
+13. [Operational Runbooks](#13-operational-runbooks)
 
 ---
 
@@ -528,6 +529,22 @@ sudo systemctl start ainet-node
 * **Symptom**: Agent marked `offline` in database and excluded from discovery.
 * **Cause**: Agent worker process crashed or network latency prevented sending heartbeats within `HEARTBEAT_STALE_THRESHOLD_MINUTES`.
 * **Resolution**: Check agent worker logs (`npm run logs` or `journalctl -u ainet-node`). Restart the agent worker daemon to re-register its availability.
+
+---
+
+## 13. Operational Runbooks
+
+The troubleshooting section above covers the most common configuration errors. For step-by-step procedures on operational incidents that require deeper investigation and remediation, see the dedicated runbooks:
+
+| Runbook | Scenario |
+|---------|----------|
+| [Disk Full](operations/RUNBOOKS.md#runbook-1-disk-full) | Identify which SQLite DB is growing, safe WAL checkpoint procedure |
+| [Stuck Task](operations/RUNBOOKS.md#runbook-2-stuck-task) | Find tasks in non-terminal state > 2 hours, force-expire and return escrow |
+| [Missed Contract Upgrade](operations/RUNBOOKS.md#runbook-3-missed-contract-upgrade) | Check on-chain version, re-run upgrade script safely, rollback procedure |
+| [Circuit Breaker Open](operations/RUNBOOKS.md#runbook-4-circuit-breaker-open) | Read Prometheus metrics, verify Venice AI, manually reset breaker |
+| [Agent Heartbeat Failures](operations/RUNBOOKS.md#runbook-5-agent-heartbeat-failures) | Diagnose stale agents, force-deregister, re-register |
+
+**→ [View all runbooks in docs/operations/RUNBOOKS.md](operations/RUNBOOKS.md)**
 
 ---
 
