@@ -232,12 +232,22 @@ Check that the balance is loaded:
 curl "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" | jq '.balances'
 ```
 
-### Step 6.3: Escrow Liquidity Guidelines
+### Step 6.3: Agent Staking & Bond Management
+
+Agents registering capabilities must stake XLM bonds via the `agent_registry` contract. For detailed guidance on bond sizing, slashing conditions, CLI commands, and ROI calculations, see the **[Staking Guide](STAKING_GUIDE.md)**.
+
+Key points:
+- Default minimum bond: **10 XLM** (`100,000,000` stroops).
+- Recommended bonds range from 30–500 XLM depending on capability type and expected task volume.
+- Bonds are slashed 10% per SLA violation; repeated violations can freeze the agent.
+- Bond withdrawal requires a two-call deregistration process with a 24-hour cooldown.
+
+### Step 6.4: Escrow Liquidity Guidelines
 
 - **Base Reserve**: Keep at least **10 XLM** in the coordinator hot wallet for ledger reserves and network gas.
 - **Escrow Buffer**: Deposit operational funds into the `payment_escrow` contract or keep an automated monitoring alert when the balance drops below **50 XLM**.
 
-### Step 6.4: Payment Lifecycle & Escrow Verification
+### Step 6.5: Payment Lifecycle & Escrow Verification
 
 For a complete architectural visual reference of task funding, sealed bidding, escrow locking/release/refund flows, and juror dispute voting, consult the [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).
 

@@ -68,6 +68,8 @@
 
 Before integrating, you need:
 
+See the [Staking Guide](STAKING_GUIDE.md) for bond sizing, slashing conditions, CLI guidance, and withdrawal details.
+
 ### 2.1 Stellar Account
 
 You must have a Stellar keypair with sufficient XLM to cover the staking bond and transaction fees.
