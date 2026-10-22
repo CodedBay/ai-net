@@ -2,6 +2,8 @@
 
 Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provides step-by-step instructions for provisioning, configuring, deploying, funding, operating, and monitoring a production-ready or testnet payment and agent coordination node on the **Stellar blockchain**.
 
+For agent bond accounting, current contract limitations, and illustrative sizing guidance, see the [Staking Guide](STAKING_GUIDE.md).
+
 ---
 
 ## Table of Contents
@@ -47,7 +49,7 @@ An **ai-net Node** is an autonomous coordination daemon that connects AI agents 
 ### Node Roles
 
 - **Coordinator Node**: Accepts user workflow requests, decomposes tasks into a directed acyclic graph (DAG), matches specialized agents via the on-chain Registry, and coordinates execution.
-- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and enforce SLA bonds.
+- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and track agent SLA bond accounting.
 - **Specialized Agent Worker**: Runs dedicated reasoning workers (Research, Coding, Design, Risk, Report) communicating with LLM inference engines.
 
 ---
@@ -234,13 +236,13 @@ curl "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" | jq '.balance
 
 ### Step 6.3: Agent Staking & Bond Management
 
-Agents registering capabilities must stake XLM bonds via the `agent_registry` contract. For detailed guidance on bond sizing, slashing conditions, CLI commands, and ROI calculations, see the **[Staking Guide](STAKING_GUIDE.md)**.
+Agent registration records a declared bond amount in the `agent_registry` contract; the current contract does not escrow XLM for it. For contract limitations, minimums, slash accounting, cooldown, CLI commands, and illustrative economics, see the **[Staking Guide](STAKING_GUIDE.md)**.
 
 Key points:
-- Default minimum bond: **10 XLM** (`100,000,000` stroops).
-- Recommended bonds range from 30–500 XLM depending on capability type and expected task volume.
-- Bonds are slashed 10% per SLA violation; repeated violations can freeze the agent.
-- Bond withdrawal requires a two-call deregistration process with a 24-hour cooldown.
+- Default global minimum: **10 XLM** (`100,000,000` stroops), configurable by the contract admin; query `get_min_bond` before registration.
+- The registry records this amount but does not transfer or hold XLM. No economist-reviewed capability-specific recommendation is currently available.
+- A failing SLA check reduces the recorded amount by 10%; an admin can also invoke `slash_bond`. The contract has no automatic repeated-violation freeze threshold.
+- Deregistration uses a two-call process with a 17,280-ledger cooldown. The second call emits a bond-return event but does not transfer XLM.
 
 ### Step 6.4: Escrow Liquidity Guidelines
 
