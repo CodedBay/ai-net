@@ -117,6 +117,7 @@ ai-net/
 ## Documentation & Integration Guides
 
 - [AI-Agent Integration Guide](docs/ai-agent-integration-guide.md) — Step-by-step guide for registering third-party agents, staking bonds, heartbeats, task execution, and dispute resolution.
+- [Venice AI Prompting Guide](docs/VENICE_AI_PROMPTING.md) — Model selection, prompt templates, context budgeting, pricing, streaming, and error handling.
 - [Smart Contract Deployment & Upgrades](smart-contracts/docs/DEPLOYMENT_GUIDE.md) — Deployment and upgrade workflows.
 - [Storage Migration Guide](smart-contracts/docs/STORAGE_MIGRATION.md) — Storage migration guidelines.
 
