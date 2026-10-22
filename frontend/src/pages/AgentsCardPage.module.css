@@ -35,9 +35,11 @@
 
 /* ── Card skeleton (mirrors AgentRegistryCard layout) ───────────────────────── */
 .cardSkeleton {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 252px;
   padding: 20px;
   border-radius: var(--radius-xl, 16px);
   border: 1px solid var(--border-color, var(--border-strong));
@@ -47,7 +49,13 @@
 .cardSkeletonHeader {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
+}
+
+.cardSkeletonName {
+  flex: 1;
+  min-width: 0;
 }
 
 .cardSkeletonPills {
@@ -63,6 +71,12 @@
   padding: 10px 0;
   border-top: 1px solid var(--border-color, var(--border-strong));
   border-bottom: 1px solid var(--border-color, var(--border-strong));
+}
+
+.cardSkeletonMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* ── View toggle ────────────────────────────────────────────────────────────── */

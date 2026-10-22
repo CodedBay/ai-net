@@ -245,17 +245,10 @@
   opacity: 0.85;
 }
 
-.balanceSkeleton {
-  height: 40px;
-  width: 200px;
-  background: var(--white-alpha-20);
-  border-radius: var(--radius-lg);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.6; }
+.balanceValueSkeleton {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .balanceError {

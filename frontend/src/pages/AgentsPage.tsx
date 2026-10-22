@@ -65,7 +65,7 @@ function AgentCardSkeleton() {
       {/* Header */}
       <div className={cardStyles.cardSkeletonHeader}>
         <Skeleton variant="circular" width={40} height={40} />
-        <div style={{ flex: 1 }}>
+        <div className={cardStyles.cardSkeletonName}>
           <Skeleton width="60%" height="1rem" style={{ marginBottom: 6 }} />
           <Skeleton width="40%" height="0.7rem" />
         </div>
@@ -79,11 +79,17 @@ function AgentCardSkeleton() {
       </div>
       {/* Metrics */}
       <div className={cardStyles.cardSkeletonMetrics}>
-        <Skeleton width="40%" height="0.7rem" />
-        <Skeleton width="30%" height="0.7rem" />
+        <div className={cardStyles.cardSkeletonMetric}>
+          <Skeleton width="2.5rem" height="0.7rem" />
+          <Skeleton width="3.5rem" height="1rem" />
+        </div>
+        <div className={cardStyles.cardSkeletonMetric}>
+          <Skeleton width="4.5rem" height="0.7rem" />
+          <Skeleton width="5rem" height="1rem" />
+        </div>
       </div>
       {/* CTA button */}
-      <Skeleton variant="pill" width="100%" height="2.5rem" />
+      <Skeleton variant="pill" width="100%" height="2.625rem" />
     </div>
   )
 }

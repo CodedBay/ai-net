@@ -113,6 +113,9 @@
   --white-alpha-25: rgba(255, 255, 255, 0.25);
   --white-alpha-30: rgba(255, 255, 255, 0.3);
 
+  --neutral-200: #e5e7eb;
+  --neutral-700: #374151;
+
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -169,8 +172,8 @@
   --text-main: var(--text-primary);
   --text-tertiary: var(--text-muted);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  --skeleton-base: var(--surface-raised);
-  --skeleton-shine: var(--border-primary);
+  --skeleton-base: var(--neutral-700);
+  --skeleton-shine: color-mix(in srgb, var(--skeleton-base) 80%, white 20%);
 
   /* ── Typography ──────────────────────────────────────────────────────────── */
   /* Font families */
@@ -332,6 +335,8 @@
   --status-danger-border-strong: #ef4444;
   --status-danger-text: #991b1b;
   --agent-design: #be185d;
+  --skeleton-base: var(--neutral-200);
+  --skeleton-shine: color-mix(in srgb, var(--skeleton-base) 80%, white 20%);
   --agent-research-surface: rgba(14, 165, 233, 0.11);
   --agent-risk-surface: rgba(245, 158, 11, 0.11);
   --agent-coding-surface: rgba(124, 58, 237, 0.11);

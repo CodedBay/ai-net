@@ -5,7 +5,7 @@ import { useParams } from 'react-router-dom';
 import { useTaskMonitor } from '../hooks/useTaskMonitor';
 import { TaskDetailTimeline } from '../components/dashboard/TaskDetailTimeline';
 import { PaymentTimeline } from '../components/dashboard/PaymentTimeline';
-import { Skeleton, SkeletonText } from '../components/common/Skeleton';
+import { Skeleton, SkeletonDAGVisualization, SkeletonText } from '../components/common/Skeleton';
 import { EmptyState } from '../components/common/EmptyState';
 import { TaskFailedIllustration } from '../components/common/illustrations';
 import { AlertCircle, CheckCircle2, Play, RefreshCw } from 'lucide-react';
@@ -56,20 +56,7 @@ export const TaskDetailSkeleton: React.FC = () => {
         </div>
       </div>
 
-      {/* Timeline Panel */}
-      <div className="glass-panel relative flex flex-col">
-        <Skeleton width="12rem" height="1.5rem" className="mb-4" />
-        <div className="space-y-4">
-          <Skeleton height="80px" />
-          <Skeleton height="80px" />
-          <Skeleton height="80px" />
-        </div>
-        <div className="w-full bg-slate-950/40 rounded-xl border border-[var(--panel-border)] overflow-hidden flex items-center gap-8 px-8" style={{ height: '280px' }}>
-          {Array.from({ length: 3 }, (_, index) => (
-            <Skeleton key={index} variant="rect" width="160px" height="92px" className="shrink-0 rounded-xl" />
-          ))}
-        </div>
-      </div>
+      <SkeletonDAGVisualization />
 
       {/* Combined Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">

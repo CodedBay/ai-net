@@ -3,9 +3,11 @@
 /* ── Card container ─────────────────────────────────────────────────────────── */
 .card {
   position: relative;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  min-height: 252px;
   padding: 20px;
   border-radius: var(--radius-xl, 16px);
   border: 1px solid var(--border-color, var(--border-strong));

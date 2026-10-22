@@ -23,10 +23,10 @@
 
 @keyframes shimmer {
   0% {
-    background-position: 200% 0;
+    background-position: -200% 0;
   }
   100% {
-    background-position: -200% 0;
+    background-position: 200% 0;
   }
 }
 
@@ -91,15 +91,48 @@
 }
 
 .dagSkeleton {
-  min-height: 280px;
+  box-sizing: border-box;
+  height: 280px;
+  padding: 20px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-glass-subtle);
 }
 
 .dagNodes {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  gap: 3rem;
-  min-height: 220px;
+  justify-items: center;
+  gap: 1rem;
+  height: calc(100% - 2.25rem);
   overflow: hidden;
+}
+
+.dagNodes::before {
+  position: absolute;
+  top: 50%;
+  right: 12%;
+  left: 12%;
+  height: 2px;
+  background: var(--border-strong);
+  content: '';
+}
+
+.dagNode {
+  z-index: 1;
+  display: flex;
+  width: min(100%, 9rem);
+  height: 5.75rem;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-primary);
 }
 
 .taskPanels {
@@ -110,6 +143,14 @@
   .dashboardKpis,
   .taskPanels {
     grid-template-columns: 1fr;
+  }
+
+  .dagSkeleton {
+    padding: 16px;
+  }
+
+  .dagNodes {
+    gap: 0.5rem;
   }
 }
 

@@ -35,7 +35,10 @@ export function WalletPageSkeleton() {
       <div className={styles.balanceCardSkeleton}>
         <div className={styles.balanceSkeletonSection}>
           <Skeleton width="10rem" height="0.75rem" />
-          <Skeleton width="14rem" height="2rem" />
+          <div className={styles.balanceValueSkeleton}>
+            <Skeleton width="14rem" height="2rem" />
+            <Skeleton width="2.5rem" height="1rem" />
+          </div>
         </div>
         <div className={styles.publicKeySkeleton}>
           <SkeletonAvatar size={116} data-testid="wallet-qr-skeleton" />
@@ -124,7 +127,12 @@ function WalletPage() {
 
   const balanceDisplay = useMemo(() => {
     if (balanceLoading) {
-      return <div className={styles.balanceSkeleton} aria-busy="true" />
+      return (
+        <div className={styles.balanceValueSkeleton} aria-busy="true">
+          <Skeleton width="14rem" height="2rem" />
+          <Skeleton width="2.5rem" height="1rem" />
+        </div>
+      )
     }
     if (balanceError) {
       return <span className={styles.balanceError}>—</span>
