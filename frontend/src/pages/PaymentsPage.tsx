@@ -2,7 +2,9 @@ import { useState, useCallback } from 'react'
 import { CreditCard, Download, RefreshCw, ExternalLink } from 'lucide-react'
 import { useWallet } from '../context/WalletContext'
 import { usePayments, type PaymentRow } from '../hooks/usePayments'
+import { useBreadcrumbLabel } from '../components/layout/Breadcrumb'
 import { Skeleton } from '../components/common/Skeleton'
+import { PaymentFeedback } from '../components/wallet/PaymentFeedback'
 import styles from './PaymentsPage.module.css'
 
 const ITEMS_PER_PAGE = 20
@@ -62,6 +64,7 @@ function PaymentsPage() {
     dateTo,
     status: statusFilter,
   })
+  useBreadcrumbLabel('Payment History')
 
   const totalPages = Math.max(1, Math.ceil(rows.length / ITEMS_PER_PAGE))
   const pagedRows = rows.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
@@ -125,6 +128,8 @@ function PaymentsPage() {
           </button>
         </div>
       </div>
+
+      <PaymentFeedback />
 
       {/* ── Filters ────────────────────────────────────────────────────── */}
       <div className={styles.filters} role="search" aria-label="Filter payments">

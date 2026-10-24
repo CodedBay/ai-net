@@ -10,7 +10,7 @@ import styles from './WalletWizard.module.css'
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
   const { balance, balances } = useWalletBalance(publicKey)
-  const { currentStep, nextStep, prevStep } = useOnboarding(4)
+  const { currentStep, nextStep, prevStep } = useOnboarding()
 
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)

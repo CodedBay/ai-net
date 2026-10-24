@@ -589,10 +589,24 @@ curl -s -X POST http://localhost:3001/api/v1/agents/research-agent-v1/heartbeat 
 
 ---
 
+## Secret Rotation
+
+JWT signing secrets rotate automatically every 90 days through AWS Secrets Manager. Venice API keys require a human renewal; EventBridge sends a quarterly Slack reminder and never replaces the active key with a placeholder.
+
+### Emergency Rotation
+
+1. Renew the Venice API key at the provider dashboard when rotating `VENICE_API_KEY`. For `JWT_SECRET`, leave the new-value input empty so the workflow generates a 64-byte key.
+2. In GitHub Actions, run **Emergency Secret Rotation** and choose `staging` or `production`. Production runs require `CONFIRM`.
+3. The workflow writes the new value to Secrets Manager, forces an ECS rolling deployment, and waits for the service to become stable. Slack receives a success or failure notification.
+4. Verify the ECS service has the expected running task count. Investigate failed deployments before retrying the rotation.
+
+Secrets Manager API activity is recorded in the `ai-net-{environment}-secrets-audit` CloudTrail trail. The rotation Lambda and Terraform resources are defined in `infra/modules/secrets/`. Configure the GitHub environment secrets `AWS_ROTATION_ROLE_ARN`, `AWS_REGION`, and `SLACK_WEBHOOK_URL`; the assumed AWS role needs permission to update these Secrets Manager values and redeploy the backend ECS service.
+
 ## Related Documentation
 
 - [Node Operators Guide](../NODE_OPERATORS_GUIDE.md) — provisioning, configuration, and initial setup
 - [Health Checks and Graceful Shutdown](health-and-shutdown.md) — probe contracts and shutdown order
+- [Incident Response Playbook](INCIDENT_RESPONSE.md) — severity classification, escalation paths, and common production incident procedures
 - [Testnet Contract Upgrade Runbook](../../smart-contracts/docs/TESTNET_UPGRADE_RUNBOOK.md) — full upgrade and rollback procedures
 - [REST API Reference](../API_REFERENCE.md) — endpoint documentation including admin endpoints
 - [Architecture Specification](../architecture/index.md) — system component reference

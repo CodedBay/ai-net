@@ -27,6 +27,7 @@ export type SpanStatus = 'running' | 'completed' | 'failed';
  */
 export interface TraceSpan {
   spanId: string;
+  parentSpanId?: string;
   correlationId: string;
   service: string;
   operation: string;

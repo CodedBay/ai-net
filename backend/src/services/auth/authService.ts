@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { Keypair } from "@stellar/stellar-sdk";
 import {
   AuthDb,
   AuthSession,
@@ -13,6 +14,8 @@ import { AuthenticationError } from "../../errors/AuthenticationError";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger({ component: "auth-service" });
+const WALLET_NONCE_TTL_MS = 5 * 60 * 1000;
+const WALLET_ACCESS_TTL_SECONDS = 24 * 60 * 60;
 
 export interface CreateSessionParams {
   walletPublicKey: string;
@@ -67,7 +70,10 @@ export class AuthService {
   /**
    * Issues a new access token and refresh token pair, creating a new session family.
    */
-  public createSession(params: CreateSessionParams): AuthTokensResponse {
+  public createSession(
+    params: CreateSessionParams,
+    accessTokenTtlSeconds = this.tokenService.getAccessTtlSeconds(),
+  ): AuthTokensResponse {
     const now = new Date();
     const nowIso = now.toISOString();
     const nowEpoch = Math.floor(now.getTime() / 1000);
@@ -125,6 +131,7 @@ export class AuthService {
       sessionId,
       familyId,
       deviceId: params.deviceId,
+      accessTokenTtlSeconds,
     });
 
     // Record audit log
@@ -155,6 +162,52 @@ export class AuthService {
         expiresAt: expiresAtIso,
       },
     };
+  }
+
+  public createWalletNonce(): { nonce: string; expiresAt: string } {
+    const nonce = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + WALLET_NONCE_TTL_MS).toISOString();
+    this.authDb.createWalletNonce(nonce, expiresAt);
+    return { nonce, expiresAt };
+  }
+
+  public verifyWalletSignature(params: {
+    walletPublicKey: string;
+    nonce: string;
+    signature: string;
+    deviceId: string;
+    ipAddress: string;
+    userAgent: string;
+  }): AuthTokensResponse {
+    let signature: Buffer;
+    let valid = false;
+    try {
+      signature = Buffer.from(params.signature, "base64");
+      if (signature.length !== 64 || signature.toString("base64") !== params.signature) {
+        throw new Error("Invalid signature encoding");
+      }
+      valid = Keypair.fromPublicKey(params.walletPublicKey).verify(
+        Buffer.from(params.nonce, "utf8"),
+        signature,
+      );
+    } catch {
+      throw new AuthenticationError("Invalid wallet signature");
+    }
+    if (!valid) throw new AuthenticationError("Invalid wallet signature");
+
+    if (!this.authDb.consumeWalletNonce(params.nonce, new Date().toISOString())) {
+      throw new AuthenticationError("Nonce is invalid, expired, or already used");
+    }
+
+    return this.createSession(
+      {
+        walletPublicKey: params.walletPublicKey,
+        deviceId: params.deviceId,
+        ipAddress: params.ipAddress,
+        userAgent: params.userAgent,
+      },
+      WALLET_ACCESS_TTL_SECONDS,
+    );
   }
 
   /**

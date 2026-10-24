@@ -91,6 +91,8 @@ export interface ReputationDimensions {
 export interface ReputationHistory {
   date: string;
   score: number;
+  taskId?: string;
+  nodeId?: string;
 }
 
 export interface AgentReputation {

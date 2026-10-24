@@ -153,6 +153,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JSON Web Token for authenticated user sessions
+    AdminApiKey:
+      type: apiKey
+      in: header
+      name: X-Admin-API-Key
+      description: Administrative API key for protected operations
   headers:
     X-RateLimit-Limit:
       description: The maximum number of requests allowed in the current period.
@@ -316,8 +321,9 @@ components:
           example:
             summary: Liquidity increased by 14% week-over-week.
         error:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
           example: null
           description: Error message if the node execution failed.
     CreateTaskResponse:
@@ -492,6 +498,10 @@ components:
         reputationScore:
           type: number
           example: 98.5
+        quality_score:
+          type: number
+          description: Average composite quality score (0-100), when score history exists
+          example: 87.5
         lastSeenAt:
           type: string
           format: date-time
@@ -500,12 +510,16 @@ components:
       type: object
       required:
         - status
-        - lastSeenAt
+        - agentId
+        - timestamp
       properties:
         status:
           type: string
           example: ok
-        lastSeenAt:
+        agentId:
+          type: string
+          example: agent_crypto_analyst_01
+        timestamp:
           type: string
           format: date-time
           example: 2026-08-25T17:30:00.000Z
@@ -683,19 +697,23 @@ components:
           type: integer
           example: 3
         nextRunAt:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
         lockedAt:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
         lockedBy:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         error:
-          type: string
-          nullable: true
+          type:
+            - string
+            - "null"
         createdAt:
           type: string
           format: date-time
@@ -792,20 +810,210 @@ components:
           type: string
           format: date-time
           example: 2026-08-25T17:01:00.000Z
+    ErrorPayload:
+      description: Error detail. Structured handlers emit an object with message,
+        code, correlationId and details; some legacy handlers emit a plain
+        string message.
+      oneOf:
+        - type: string
+          example: Task not found
+        - type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
+              example: "Task not found: task_123"
+            code:
+              type: string
+              example: NOT_FOUND
+            correlationId:
+              type: string
+              example: 3d00cb11-fa1b-4449-89ab-65278761da51
+            details:
+              type: object
+            timestamp:
+              type: string
+              format: date-time
     ErrorResponse:
       type: object
       required:
         - error
       properties:
         error:
-          type: string
-          example: Invalid request payload or parameters
+          $ref: "#/components/schemas/ErrorPayload"
         code:
           type: string
           example: INVALID_REQUEST
         details:
           type: object
           description: Optional structured validation errors or error context
+    Error:
+      type: object
+      properties:
+        error:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                message:
+                  type: string
+                code:
+                  type: string
+              additionalProperties: true
+        message:
+          type: string
+        code:
+          type: string
+      additionalProperties: true
+    PaymentRecord:
+      type: object
+      required:
+        - taskId
+        - nodeId
+        - balanceId
+        - status
+        - amountStroops
+        - txHash
+      properties:
+        taskId:
+          type: string
+        nodeId:
+          type: string
+        balanceId:
+          type: string
+        status:
+          type: string
+          enum:
+            - locked
+            - released
+            - refunded
+        amountStroops:
+          type: string
+          pattern: ^[0-9]+$
+        txHash:
+          type:
+            - string
+            - "null"
+    ReconciliationReport:
+      type: object
+      required:
+        - id
+        - runAt
+        - triggeredBy
+        - status
+        - summary
+        - discrepancies
+      properties:
+        id:
+          type: string
+        runAt:
+          type: string
+          format: date-time
+        triggeredBy:
+          type: string
+          enum:
+            - manual
+            - scheduled
+            - release
+        status:
+          type: string
+          enum:
+            - consistent
+            - discrepancies_found
+        summary:
+          type: object
+          required:
+            - totalLocalRecords
+            - totalOnChainBalances
+            - matched
+            - discrepancies
+            - missingOnChain
+            - missingLocal
+            - amountMismatch
+          properties:
+            totalLocalRecords:
+              type: integer
+            totalOnChainBalances:
+              type: integer
+            matched:
+              type: integer
+            discrepancies:
+              type: integer
+            missingOnChain:
+              type: integer
+            missingLocal:
+              type: integer
+            amountMismatch:
+              type: integer
+        discrepancies:
+          type: array
+          items:
+            type: object
+            required:
+              - type
+              - balanceId
+              - severity
+              - description
+            properties:
+              type:
+                type: string
+                enum:
+                  - missing_on_chain
+                  - missing_local
+                  - amount_mismatch
+              balanceId:
+                type: string
+              taskId:
+                type: string
+              nodeId:
+                type: string
+              severity:
+                type: string
+                enum:
+                  - info
+                  - warning
+                  - critical
+              description:
+                type: string
+              localAmountStroops:
+                type: string
+              onChainAmountStroops:
+                type: string
+              expectedAmountStroops:
+                type: string
+    ContractEvent:
+      type: object
+      required:
+        - contractId
+        - eventType
+        - version
+        - payload
+        - ledgerSeq
+        - txHash
+        - occurredAt
+        - indexedAt
+      properties:
+        id:
+          type: integer
+        contractId:
+          type: string
+        eventType:
+          type: string
+        version:
+          type: integer
+        payload:
+          type: string
+        ledgerSeq:
+          type: integer
+        txHash:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        indexedAt:
+          type: string
+          format: date-time
     ValidationError:
       type: object
       required:
@@ -831,44 +1039,28 @@ components:
         - error
       properties:
         error:
-          oneOf:
-            - type: string
-              example: Missing or invalid walletpublickey authentication header
-            - type: object
-              properties:
-                code:
-                  type: string
-                  example: UNAUTHORIZED
-                message:
-                  type: string
-                  example: Invalid refresh token
-                correlationId:
-                  type: string
-                  example: 0afbd903-d97c-48bc-bf26-b430fcb863cd
+          $ref: "#/components/schemas/ErrorPayload"
     ForbiddenError:
       type: object
       required:
         - error
       properties:
         error:
-          type: string
-          example: You do not have permission to access or modify this resource
+          $ref: "#/components/schemas/ErrorPayload"
     NotFoundError:
       type: object
       required:
         - error
       properties:
         error:
-          type: string
-          example: Task not found
+          $ref: "#/components/schemas/ErrorPayload"
     RateLimitError:
       type: object
       required:
         - error
       properties:
         error:
-          type: string
-          example: Too many requests. Please try again later.
+          $ref: "#/components/schemas/ErrorPayload"
         retryAfter:
           type: integer
           example: 60
@@ -878,16 +1070,14 @@ components:
         - error
       properties:
         error:
-          type: string
-          example: An unexpected internal server error occurred
+          $ref: "#/components/schemas/ErrorPayload"
     ServiceUnavailableError:
       type: object
       required:
         - error
       properties:
         error:
-          type: string
-          example: Service dependencies are unavailable
+          $ref: "#/components/schemas/ErrorPayload"
     AuthTokensResponse:
       type: object
       required:
@@ -927,8 +1117,9 @@ components:
               type: string
               example: device_macbook_pro
             deviceName:
-              type: string
-              nullable: true
+              type:
+                - string
+                - "null"
               example: Chrome on macOS
             expiresAt:
               type: string
@@ -978,6 +1169,15 @@ paths:
         - Tasks
       security:
         - WalletAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: UUID v4 key scoped to the wallet. Repeated requests replay the
+            original response for 24 hours.
       requestBody:
         required: true
         content:
@@ -1372,31 +1572,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/ratelimit/status:
+  /api/payments:
     get:
-      summary: Get rate limit status for a key
-      description: Admin endpoint to view current token bucket usage for a given key
-        and endpoint prefix.
+      summary: List all payment records
+      operationId: listPayments
       tags:
-        - Admin
-        - RateLimit
-      parameters:
-        - in: query
-          name: key
-          required: true
-          schema:
-            type: string
-          description: The rate limit key (e.g. "tasks:wallet_abc123" or "global:127.0.0.1")
-        - in: query
-          name: rule
-          schema:
-            type: string
-            enum:
-              - GLOBAL
-              - TASKS
-              - AGENTS_REGISTER
-              - PAYMENTS
-            default: GLOBAL
+        - Payments
+      security: []
+      description: >
+        Returns the full local payment history — every locked, released, and
+        refunded record. Records are ordered by taskId + nodeId (composite
+        primary key). This is the reconciliation source of truth for the
+        network's Stellar claimable-balance payment flow.
       responses:
         "200":
           description: Rate limit status
@@ -1404,6 +1591,38 @@ paths:
           description: Missing key parameter
         "404":
           description: Key not found in rate limiter cache
+  /api/payments:
+    get:
+      summary: List all payment records
+      operationId: listPayments
+      tags:
+        - Payments
+      security: []
+      description: >
+        Returns the full local payment history — every locked, released, and
+        refunded record. Records are ordered by taskId + nodeId (composite
+        primary key). This is the reconciliation source of truth for the
+        network's Stellar claimable-balance payment flow.
+      responses:
+        "200":
+          description: Payment record list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaymentRecord"
+                  total:
+                    type: integer
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /metrics:
     get:
       summary: Prometheus metrics endpoint
@@ -1436,7 +1655,8 @@ paths:
     get:
       summary: Basic liveness check
       operationId: getHealth
-      description: Returns process uptime, version, and Stellar network name. No external dependency checks.
+      description: Returns process uptime, version, and Stellar network name. No
+        external dependency checks.
       tags:
         - Health
       security: []
@@ -1462,6 +1682,162 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /health/deep:
+    get:
+      summary: Deep dependency health check
+      operationId: getDeepHealth
+      description: >
+        Probes external dependencies (Venice AI, Stellar Horizon) and reports
+        their individual status. Always returns 200 — dependency degradation is
+        reported in the body (`status: "degraded"`) rather than as an HTTP
+        failure, so diagnostic consumers can read full details. Readiness for
+        traffic lives on `/health/ready`.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Dependency status report (ok or degraded)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - services
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ok
+                      - degraded
+                    example: degraded
+                  services:
+                    type: object
+                    properties:
+                      venice:
+                        type: string
+                        enum:
+                          - ok
+                          - error
+                          - unknown
+                        example: error
+                      horizon:
+                        type: string
+                        enum:
+                          - ok
+                          - error
+                          - unknown
+                        example: ok
+                  venice:
+                    type: string
+                    enum:
+                      - ok
+                      - error
+                      - unknown
+                    example: error
+                  horizon:
+                    type: string
+                    enum:
+                      - ok
+                      - error
+                      - unknown
+                    example: ok
+  /health/ready:
+    get:
+      summary: Readiness probe
+      operationId: getReady
+      description: >
+        Returns 200 when every dependency check passes (task DB, payment DB,
+        queue, Venice AI, Horizon, WebSocket server) and 500 otherwise, so
+        orchestrators can gate traffic on readiness.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: All dependencies ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "500":
+          description: One or more dependencies failing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+  /api/events:
+    get:
+      summary: Query indexed Soroban contract events
+      operationId: listContractEvents
+      tags:
+        - Events
+      parameters:
+        - in: query
+          name: contract
+          schema:
+            type: string
+          description: Filter by Soroban contract ID
+        - in: query
+          name: type
+          schema:
+            type: string
+          description: Filter by event type (e.g. "registry:agent_reg")
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 lower bound (inclusive) on occurred_at
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 upper bound (inclusive) on occurred_at
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of contract events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContractEvent"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        "400":
+          description: Invalid query parameters
+  /api/events/status:
+    get:
+      summary: Return the event indexer status
+      operationId: getEventIndexerStatus
+      tags:
+        - Events
+      responses:
+        "200":
+          description: Indexer status
   /api/auth/token:
     post:
       summary: Issue access and refresh token pair
@@ -1518,10 +1894,6 @@ paths:
                 $ref: "#/components/schemas/TokenRefreshResponse"
         "401":
           description: Invalid, expired, or reused refresh token
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UnauthorizedError"
   /api/auth/revoke:
     post:
       summary: Revoke session
@@ -1700,6 +2072,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotFoundError"
+  "/api/agents/{id}/task-result":
+    post:
+      summary: Report a task outcome and update agent reputation
+      description: >
+        Applies the Issue #497 reputation update rules: success raises the score
+        based on quality and latency with a bounded bond multiplier; failure
+        applies a fixed penalty. Response includes the full reputation breakdown
+        after the update.
+      tags:
+        - Agents
+      security: []
+      operationId: recordAgentTaskResult
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: agent_crypto_analyst_01
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome
+              properties:
+                outcome:
+                  type: string
+                  enum:
+                    - success
+                    - failure
+                qualityScore:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                latencyMs:
+                  type: number
+                  minimum: 0
+      responses:
+        "200":
+          description: Reputation updated
+        "404":
+          description: Agent not found
   "/api/agents/{id}/health":
     get:
       summary: Check an agent's live health/reachability
@@ -1735,10 +2152,6 @@ paths:
       responses:
         "201":
           description: Agent registered successfully
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Agent"
         "400":
           description: Validation error or Stellar account verification failure
         "429":
@@ -1781,6 +2194,181 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RateLimitError"
+  /api/admin/stats:
+    get:
+      summary: Platform metrics for administrators
+      description: >
+        Agent counts, task volume by status, and XLM throughput. Requires the
+        admin API key; missing or invalid keys return 403.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      responses:
+        "200":
+          description: Platform aggregates
+        "403":
+          description: Missing or invalid admin API key
+  /api/admin/tasks:
+    get:
+      summary: List all tasks with filters
+      description: Supports status, wallet, date-range and pagination filters.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - running
+              - completed
+              - failed
+              - cancelled
+        - in: query
+          name: wallet
+          schema:
+            type: string
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated task list
+        "400":
+          description: Invalid query
+        "403":
+          description: Missing or invalid admin API key
+  "/api/admin/tasks/{id}":
+    delete:
+      summary: Cancel any task
+      description: Force-cancels a task, cancels its queued job, and refunds locked
+        payments where possible.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task cancelled
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Task not found
+        "409":
+          description: Task already terminal
+  "/api/admin/agents/{id}/ban":
+    post:
+      summary: Ban an agent
+      description: >
+        Marks an agent as banned and offline so it is excluded from new task
+        assignments until unbanned.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Agent banned
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Agent not found
+  "/api/admin/agents/{id}/unban":
+    post:
+      summary: Lift an agent ban
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent unbanned
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Agent not found
+  /api/admin/logs:
+    get:
+      summary: Recent error log entries
+      description: In-memory ring buffer of the most recent error/fatal log lines.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - in: query
+          name: level
+          schema:
+            type: string
+            enum:
+              - error
+              - fatal
+      responses:
+        "200":
+          description: Recent error log entries (newest first)
+        "400":
+          description: Invalid query
+        "403":
+          description: Missing or invalid admin API key
   "/api/admin/traces/{id}":
     get:
       summary: Retrieve a distributed trace by traceId or requestId
@@ -1793,7 +2381,7 @@ paths:
       tags:
         - Admin
       security:
-        - adminApiKey: []
+        - AdminApiKey: []
       parameters:
         - in: path
           name: id

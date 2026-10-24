@@ -1,0 +1,66 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "panels": [
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "expression": "SEARCH('{AiNet/SmartContracts,Operation} CpuInstructions', 'Average', 86400)",
+          "id": "gas",
+          "label": "$PROP('Dim.Operation')",
+          "refId": "A",
+          "region": "default",
+          "type": "expressions"
+        }
+      ],
+      "title": "Smart contract CPU instructions by operation",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1h",
+  "schemaVersion": 39,
+  "tags": [
+    "ai-net",
+    "soroban",
+    "gas"
+  ],
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "title": "Smart Contract Gas Trends",
+  "uid": "ai-net-gas-cost-trends",
+  "version": 1
+}

@@ -111,7 +111,10 @@ resource "aws_ecs_task_definition" "backend" {
     ]
 
     secrets = [for arn in var.secrets_arns : {
-      name      = split("/", arn)[length(split("/", arn)) - 1]
+      name = split("/", arn)[length(split("/", arn)) - 1] == "jwt_secret" ? "AUTH_JWT_SECRET" : (
+        split("/", arn)[length(split("/", arn)) - 1] == "venice_api_key" ? "VENICE_API_KEY" :
+        split("/", arn)[length(split("/", arn)) - 1]
+      )
       valueFrom = arn
     }]
 

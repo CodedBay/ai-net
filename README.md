@@ -117,7 +117,10 @@ ai-net/
 ## Documentation & Integration Guides
 
 - [Changelog](CHANGELOG.md) — Release history.
+- [SDK Quickstart](docs/SDK_QUICKSTART.md) — TypeScript setup and API basics.
+- [SDK Examples](docs/sdk-examples/python/README.md) — Runnable Python, LangChain, and browser JavaScript examples.
 - [AI-Agent Integration Guide](docs/ai-agent-integration-guide.md) — Step-by-step guide for registering third-party agents, staking bonds, heartbeats, task execution, and dispute resolution.
+- [Governance Voting Guide](docs/GOVERNANCE_GUIDE.md) — Agent-governance voting, proposal lifecycle, and multisig emergency actions.
 - [Smart Contract Deployment & Upgrades](smart-contracts/docs/DEPLOYMENT_GUIDE.md) — Deployment and upgrade workflows.
 - [Storage Migration Guide](smart-contracts/docs/STORAGE_MIGRATION.md) — Storage migration guidelines.
 - [Storybook UI Components](https://codedsceptre.github.io/ai-net/) — Reusable component library and interaction documentation.
@@ -259,6 +262,7 @@ npm run test:e2e
 
 ## Documentation
 
+- [Freighter Wallet Setup](docs/WALLET_SETUP.md): Dedicated testnet account, funding, and wallet connection instructions.
 - [Developer Setup Guide](docs/DEVELOPER_SETUP.md): Fast onboarding from clean clone to running local node, testnet deployments, Freighter wallet setup, and testing.
 - [Architecture Specification](docs/architecture/index.md): System context, component architecture, Mermaid sequence diagrams, and security model.
 - [REST API Reference](docs/API_REFERENCE.md): Comprehensive per-endpoint documentation, error codes taxonomy, authentication headers, and runnable curl examples.
@@ -277,6 +281,7 @@ npm run test:e2e
 ai-net is an open-source project and **contributions are welcome at every level** — from fixing typos to building new agent types.
 
 - Read our **[CONTRIBUTING.md](CONTRIBUTING.md)** for our SDLC, branching rules, Conventional Commits, and review checklists.
+- New contributors: follow the **[Contributor Onboarding Checklist](docs/CONTRIBUTOR_CHECKLIST.md)** — from clone to first merged PR in checklist format.
 - For AI agent contributors, see **[AGENTS.md](AGENTS.md)** for architectural standards and code invariants.
 
 Looking for a place to start? Check [ISSUES.md](ISSUES.md) or browse [good first issues](../../issues?q=label%3A%22good+first+issue%22).

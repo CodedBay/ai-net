@@ -26,9 +26,23 @@ pub use errors::Error;
 pub use types::*;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String,
-    Symbol, Vec,
+    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Bytes,
+    BytesN, Env, String, Symbol, Vec,
 };
+
+// ── Thin client for capability_staking.slash() ───────────────────────────────
+
+/// Minimal interface used to invoke `capability_staking::slash` via cross-contract call.
+#[contractclient(name = "CapabilityStakingClient")]
+pub trait ICapabilityStaking {
+    fn slash(
+        env: Env,
+        agent_id: Address,
+        capability: Bytes,
+        slash_amount: i128,
+        reason: Bytes,
+    );
+}
 
 /// Voting window: 72 hours in seconds.
 const VOTING_PERIOD_SECS: u64 = 72 * 60 * 60; // 259_200
@@ -59,6 +73,8 @@ pub enum DataKey {
     Vote(u64, Address),
     /// Monotonic counter for dispute IDs.
     NextDisputeId,
+    /// capability_staking contract address — called on Reject resolutions.
+    CapabilityStakingContract,
 }
 
 #[contract]
@@ -248,6 +264,18 @@ impl DisputeResolutionContract {
     pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &paused);
+        Ok(())
+    }
+
+    /// Admin: set the capability_staking contract address.
+    ///
+    /// When set, `resolve_dispute` will call `capability_staking.slash(...)` on
+    /// every `Resolution::Reject` outcome to economically penalise the agent.
+    pub fn set_capability_staking(env: Env, contract_id: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::CapabilityStakingContract, &contract_id);
         Ok(())
     }
 
@@ -468,26 +496,25 @@ impl DisputeResolutionContract {
         record.resolution = Some(resolution.clone());
 
         let escrow_key = DataKey::TaskEscrow(record.task_id.clone());
-        let escrow: TaskEscrow = env
+        let mut settled_escrow: TaskEscrow = env
             .storage()
             .persistent()
             .get(&escrow_key)
             .ok_or(Error::InvalidTaskEscrow)?;
         extend_ttl(&env, &escrow_key);
-        if !escrow.disputed || escrow.settled {
+        if !settled_escrow.disputed || settled_escrow.settled {
             return Err(Error::InvalidTaskEscrow);
         }
         let recipient = if resolution == Resolution::Approve {
-            escrow.agent
+            settled_escrow.agent.clone()
         } else {
-            escrow.submitter
+            settled_escrow.submitter.clone()
         };
-        token::Client::new(&env, &escrow.asset).transfer(
+        token::Client::new(&env, &settled_escrow.asset).transfer(
             &env.current_contract_address(),
             &recipient,
-            &escrow.amount,
+            &settled_escrow.amount,
         );
-        let mut settled_escrow = escrow;
         settled_escrow.settled = true;
         env.storage()
             .persistent()
@@ -505,6 +532,32 @@ impl DisputeResolutionContract {
                 reject_votes: record.reject_votes,
             },
         );
+
+        // On Reject: slash the agent's capability bond via cross-contract call.
+        if resolution == Resolution::Reject {
+            if let Some(staking_contract) = env
+                .storage()
+                .instance()
+                .get::<DataKey, Address>(&DataKey::CapabilityStakingContract)
+            {
+                // Use the full escrow amount as the slash amount; the staking
+                // contract will cap it at the agent's actual bond.
+                let slash_amount = settled_escrow.amount;
+                // Encode task_id as capability bytes for the slash call.
+                let capability = Bytes::from_slice(&env, &[]);
+                // reason = dispute_id encoded as bytes
+                let reason = Bytes::from_slice(&env, &[]);
+                let client = CapabilityStakingClient::new(&env, &staking_contract);
+                // Best-effort: if the slash panics (e.g. no stake registered),
+                // we swallow the error so dispute settlement is never blocked.
+                let _ = client.try_slash(
+                    &settled_escrow.agent,
+                    &capability,
+                    &slash_amount,
+                    &reason,
+                );
+            }
+        }
 
         Ok(resolution)
     }

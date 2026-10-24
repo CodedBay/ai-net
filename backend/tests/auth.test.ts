@@ -1,5 +1,5 @@
 import request from "supertest";
-import { StrKey } from "@stellar/stellar-sdk";
+import { StrKey } from "@stellar/stellar-base";
 import Database from "better-sqlite3";
 import express from "express";
 import { createAuthDb, AuthDb } from "../src/db/auth";
@@ -7,6 +7,8 @@ import { TokenService } from "../src/services/auth/tokenService";
 import { RevocationRegistry } from "../src/services/auth/revocationRegistry";
 import { AuthService } from "../src/services/auth/authService";
 import { createAuthRouter } from "../src/api/routes/auth";
+import * as authServiceModule from "../src/services/auth/authService";
+import { resetConfigForTests } from "../src/config";
 import { authMiddleware, sessionAuthMiddleware } from "../src/api/middleware/auth";
 import { errorHandler } from "../src/api/middleware/errorHandler";
 
@@ -83,6 +85,11 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
       revocationRegistry,
     });
 
+    // authMiddleware consults the process-wide AuthService singleton; point it
+    // at this test's in-memory instance so tokens verify against the test DB
+    // and JWT secret instead of the production config.
+    jest.spyOn(authServiceModule, "getAuthService").mockReturnValue(authService);
+
     app = express();
     app.use(express.json());
     app.use("/api/auth", createAuthRouter(authService));
@@ -96,6 +103,9 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
+    delete process.env.API_KEYS;
+    resetConfigForTests();
     db.close();
   });
 
@@ -429,7 +439,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
         .send({ refreshToken: firstRefreshToken })
         .expect(401);
 
-      expect(reuseRes.body.message).toMatch(/Token reuse detected/);
+      expect(reuseRes.body.error.message).toMatch(/Token reuse detected/);
 
       // 4. Try rotating with the second refresh token -> also 401 because family was revoked!
       await request(app)
@@ -525,6 +535,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
 
     it("falls back to static API_KEYS when token is not a JWT", (done) => {
       process.env.API_KEYS = "secret-api-key-123";
+      resetConfigForTests(); // pick up the env change (config is cached)
       const req = {
         headers: { authorization: `Bearer secret-api-key-123` },
       } as any;

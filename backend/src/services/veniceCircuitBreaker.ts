@@ -95,6 +95,5 @@ export class VeniceCircuitBreaker {
 
   private publishState(): void {
     metricsService.setVeniceCircuitBreakerState(this.state.toLowerCase().replace('_', '-') as 'closed' | 'open' | 'half-open');
-    metricsService.setVeniceCircuitState(this.state.toLowerCase() as 'closed' | 'open' | 'half_open');
   }
 }

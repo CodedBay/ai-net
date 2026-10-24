@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Terminal, Clock, CheckCircle2, XCircle, ChevronDown, ChevronRight, Copy, Check, Loader2 } from 'lucide-react';
+import ResearchReportRenderer from '../agents/ResearchReportRenderer';
 import type { DAGNode } from '../../types/api';
 
 interface TaskDetailTimelineProps {
@@ -139,9 +140,7 @@ export const TaskDetailTimeline: React.FC<TaskDetailTimelineProps> = ({ nodes, o
                   <div className="mt-3 border-t border-slate-700/50 pt-3">
                     {hasOutput ? (
                       <div className="bg-background-primary p-3 rounded-lg border border-border">
-                        <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap break-words">
-                          {outputs[node.nodeId]}
-                        </pre>
+                        <ResearchReportRenderer result={outputs[node.nodeId]} />
                       </div>
                     ) : (
                       <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2">

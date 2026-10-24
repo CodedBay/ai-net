@@ -144,7 +144,7 @@ describe("identifier schemas", () => {
   });
 
   it("validates Stellar public keys", () => {
-    const valid = `G${"A".repeat(55)}`;
+    const valid = "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ";
     expect(stellarPublicKeySchema.safeParse(valid).success).toBe(true);
     expect(stellarPublicKeySchema.safeParse("GABC").success).toBe(false);
     // Lowercase is not valid base32 here.

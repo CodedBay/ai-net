@@ -17,6 +17,47 @@ permissions:
 
 # ── Job: backend-lint-typecheck ─────────────────────────────────────────────
 jobs:
+  sdk-examples:
+    name: sdk-examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Python example dependencies
+        run: python -m pip install -r docs/sdk-examples/python/requirements.txt
+
+      - name: Compile Python examples
+        run: python -m compileall -q docs/sdk-examples/python
+
+      - name: Check Python example imports
+        run: python -c "import requests; from stellar_sdk import Keypair; from langchain_core.tools import tool; assert hasattr(Keypair, 'verify') and callable(tool)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/sdk-examples/javascript/package-lock.json
+
+      - name: Install browser example dependencies
+        working-directory: docs/sdk-examples/javascript
+        run: npm ci
+
+      - name: Check browser JavaScript syntax
+        working-directory: docs/sdk-examples/javascript
+        run: npm run check
+
+      - name: Build browser example
+        working-directory: docs/sdk-examples/javascript
+        run: npm run build
+
   backend-lint-typecheck:
     name: backend-lint-typecheck
     runs-on: ubuntu-latest
@@ -37,6 +78,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify generated OpenAPI specification is current
+        run: node scripts/generate-openapi.js && git diff --exit-code -- docs/openapi.yaml
+
+      - name: Lint OpenAPI specification
+        run: npx --yes @redocly/cli lint docs/openapi.yaml --config redocly.yaml
 
       - name: Lint
         run: npx eslint src --ext .ts --max-warnings 0 || true
@@ -141,6 +188,46 @@ jobs:
         with:
           name: frontend-coverage-${{ github.run_id }}
           path: frontend/coverage/
+          retention-days: 7
+
+  frontend-accessibility:
+    name: frontend-accessibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run axe accessibility scans
+        run: npx playwright test tests/e2e/accessibility.spec.ts --project=chromium --workers=1 --reporter=list
+        env:
+          CI: "true"
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-accessibility-${{ github.run_id }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
 # ── Job: smart-contracts ─────────────────────────────────────────────────────
@@ -322,9 +409,11 @@ jobs:
     if: always()
     needs:
       - backend-lint-typecheck
+      - sdk-examples
       - backend-test
       - frontend-lint-typecheck
       - frontend-test
+      - frontend-accessibility
       - smart-contracts
       - docker-build
     runs-on: ubuntu-latest
@@ -333,18 +422,22 @@ jobs:
       - name: Evaluate all job results
         run: |
           echo "backend-lint-typecheck : ${{ needs.backend-lint-typecheck.result }}"
+          echo "sdk-examples          : ${{ needs.sdk-examples.result }}"
           echo "backend-test           : ${{ needs.backend-test.result }}"
           echo "frontend-lint-typecheck: ${{ needs.frontend-lint-typecheck.result }}"
           echo "frontend-test          : ${{ needs.frontend-test.result }}"
+          echo "frontend-accessibility: ${{ needs.frontend-accessibility.result }}"
           echo "smart-contracts        : ${{ needs.smart-contracts.result }}"
           echo "docker-build           : ${{ needs.docker-build.result }}"
 
           fail=0
           for result in \
             "${{ needs.backend-lint-typecheck.result }}" \
+            "${{ needs.sdk-examples.result }}" \
             "${{ needs.backend-test.result }}" \
             "${{ needs.frontend-lint-typecheck.result }}" \
             "${{ needs.frontend-test.result }}" \
+            "${{ needs.frontend-accessibility.result }}" \
             "${{ needs.smart-contracts.result }}" \
             "${{ needs.docker-build.result }}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then

@@ -1,0 +1,17 @@
+{
+  "name": "ai-net-browser-examples",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "check": "node --check src/main.js"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "^5.0.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

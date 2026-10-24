@@ -1,3 +1,39 @@
+/* Balance change highlight animation — 300ms flash on balance update */
+@keyframes balanceHighlight {
+  0%   { background-color: transparent; }
+  30%  { background-color: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 4px; }
+  100% { background-color: transparent; }
+}
+
+.balanceChanged {
+  animation: balanceHighlight 300ms ease-out forwards;
+}
+
+/* Available balance row */
+.availableBalanceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.availableBalanceAmount {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.availableBalanceLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.reserveNote {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
 .page {
   max-width: 960px;
   margin: 0 auto;

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react'
 import AgentCard, { type AgentData } from '../landing/AgentCard'
 
@@ -41,6 +42,16 @@ export const Offline: Story = {
 export const Featured: Story = {
   args: {
     agent: { ...agent, reputation: 100, successRate: 100 },
+  },
+}
+
+export const ComparisonSelection: Story = {
+  render: () => {
+    const SelectableAgentCard = () => {
+      const [selected, setSelected] = useState(false)
+      return <AgentCard agent={agent} index={0} selected={selected} onSelect={() => setSelected((value) => !value)} />
+    }
+    return <SelectableAgentCard />
   },
 }
 

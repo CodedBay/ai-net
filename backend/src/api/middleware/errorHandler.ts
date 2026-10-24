@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { createLogger } from "../../utils/logger";
 import { AppError } from "../../errors";
+import { PoolTimeoutError } from "../../db/pool";
 
 const log = createLogger();
 const isProduction = process.env.NODE_ENV === "production";
@@ -42,10 +43,14 @@ export function errorHandler(
   const statusCode =
     err instanceof AppError
       ? err.statusCode
+      : err instanceof PoolTimeoutError
+        ? 503
       : (err as any)?.statusCode ?? (err as any)?.status ?? 500;
   const errorCode =
     err instanceof AppError
       ? err.code
+      : err instanceof PoolTimeoutError
+        ? "DB_POOL_EXHAUSTED"
       : isDev
         ? (err as any)?.code ?? "INTERNAL_SERVER_ERROR"
         : "INTERNAL_SERVER_ERROR";
@@ -130,7 +135,7 @@ export function errorHandler(
         : err instanceof Error
           ? err.message || "Internal server error"
           : "An unexpected error occurred",
-      code: "INTERNAL_ERROR",
+      code: errorCode,
       correlationId,
       timestamp: new Date().toISOString(),
       path: req.path,

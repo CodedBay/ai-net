@@ -296,3 +296,41 @@ fn test_get_agents_zero_limit_defaults_to_page_size() {
         "limit=0 must fall back to DEFAULT_PAGE_SIZE"
     );
 }
+
+#[test]
+fn list_agents_exact_page_has_no_next_cursor() {
+    let (env, client, _) = setup_with_admin();
+    register_n_agents(&env, &client, "coding", 3);
+
+    let page = client.list_agents(&None, &3);
+
+    assert_eq!(page.agents.len(), 3);
+    assert_eq!(page.next_cursor, None);
+    assert_eq!(page.total_count, 3);
+}
+
+#[test]
+fn list_agents_returns_last_agent_cursor_for_partial_final_page() {
+    let (env, client, _) = setup_with_admin();
+    register_n_agents(&env, &client, "coding", 5);
+
+    let first = client.list_agents(&None, &3);
+    assert_eq!(first.agents.len(), 3);
+    assert_eq!(first.next_cursor, Some(first.agents.get(2).unwrap().id));
+
+    let final_page = client.list_agents(&first.next_cursor, &3);
+    assert_eq!(final_page.agents.len(), 2);
+    assert_eq!(final_page.next_cursor, None);
+}
+
+#[test]
+fn list_agents_obeys_admin_configured_page_cap() {
+    let (env, client, _) = setup_with_admin();
+    client.set_max_page_size(&2);
+    register_n_agents(&env, &client, "coding", 3);
+
+    let page = client.list_agents(&None, &MAX_PAGE_SIZE);
+
+    assert_eq!(page.agents.len(), 2);
+    assert!(page.next_cursor.is_some());
+}

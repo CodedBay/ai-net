@@ -13,8 +13,14 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { createEventsDb, getEventsDb } from "../../db/contractEvents";
+import type { EventStore, StoredEvent } from "../../events/eventStore";
+import { eventBus } from "../../coordinator/eventBus";
+import { replayTask } from "../../events/replay";
+import { CURRENT_EVENT_VERSION } from "../../events/eventTypes";
+import { validateEvent } from "../../events/schemaRegistry";
 import { getEventIndexer } from "../../services/eventIndexer";
 import { ValidationError } from "../../errors";
+import { adminAuthMiddleware } from "../middleware/auth";
 
 const QuerySchema = z.object({
   contract: z.string().optional(),
@@ -25,7 +31,15 @@ const QuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-export function createEventsRouter(): Router {
+const ReplayQuerySchema = z.object({
+  task_id: z.string().min(1),
+  until: z.string().datetime({ offset: true }).optional(),
+  cursor: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().min(1).max(10_000).default(10_000),
+  dry_run: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
+});
+
+export function createEventsRouter(eventStore?: EventStore): Router {
   const router = Router();
 
   /**
@@ -149,6 +163,76 @@ export function createEventsRouter(): Router {
         lastError: "Indexer not initialised",
       });
     }
+  });
+
+  router.get("/replay", adminAuthMiddleware, (req: Request, res: Response) => {
+    const parsed = ReplayQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "INVALID_QUERY", details: parsed.error.flatten() });
+      return;
+    }
+
+    const store = eventStore ?? eventBus.store;
+    const { task_id, until, cursor, limit, dry_run: dryRun } = parsed.data;
+    const page = store.listByTaskPage(task_id, {
+      until,
+      afterTaskSeq: cursor,
+      limit: limit + 1,
+    });
+    const hasMore = page.length > limit;
+    const events = hasMore ? page.slice(0, limit) : page;
+    if (events.length === 0 && cursor === undefined) {
+      res.status(404).json({ error: "TASK_EVENTS_NOT_FOUND", task_id });
+      return;
+    }
+
+    const warnings: Array<{
+      taskSeq: number;
+      globalSeq: number;
+      eventType: string;
+      version: number;
+      message: string;
+    }> = [];
+    const validEvents: StoredEvent[] = [];
+
+    for (const event of events) {
+      const validation = validateEvent(event);
+      if (!validation.valid) {
+        warnings.push({
+          taskSeq: event.taskSeq,
+          globalSeq: event.globalSeq,
+          eventType: event.type,
+          version: event.version,
+          message: validation.errors.join("; "),
+        });
+        continue;
+      }
+      if (event.version < CURRENT_EVENT_VERSION) {
+        warnings.push({
+          taskSeq: event.taskSeq,
+          globalSeq: event.globalSeq,
+          eventType: event.type,
+          version: event.version,
+          message: `Event uses older schema version ${event.version}; current version is ${CURRENT_EVENT_VERSION}`,
+        });
+      }
+      validEvents.push(event);
+    }
+
+    const replayed = dryRun ? undefined : replayTask(validEvents);
+    const state = replayed
+      ? { ...replayed, nodes: Object.fromEntries(replayed.nodes) }
+      : null;
+    res.json({
+      task_id,
+      until: until ?? null,
+      dry_run: dryRun,
+      state,
+      events,
+      eventsApplied: dryRun ? 0 : validEvents.length,
+      warnings,
+      next_cursor: hasMore ? events[events.length - 1].taskSeq : null,
+    });
   });
 
   return router;

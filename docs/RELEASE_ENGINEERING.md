@@ -196,3 +196,11 @@ When upgrading deployed contracts:
 
 All tracks share the same SemVer and tagging convention. A single git tag
 covers all tracks for a given version.
+
+---
+
+## Smart Contract Releases
+
+Smart contract releases on Soroban have unique requirements beyond the standard release checklist: WASM compilation, contract ID management, testnet/mainnet separation, governance approval for breaking upgrades, and emergency hotfix procedures.
+
+For the complete smart contract release workflow, upgrade safety checklist, governance approval process, and emergency hotfix procedure, see **[SMART_CONTRACT_RELEASE.md](./SMART_CONTRACT_RELEASE.md)**.

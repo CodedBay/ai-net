@@ -141,3 +141,9 @@ export const getAgent = async (id: string): Promise<AgentRecord> => {
 export const getAgentReputation = async (id: string): Promise<import('../types/agent').AgentReputation> => {
   return apiClient.get<import('../types/agent').AgentReputation>(`/api/agents/${id}/reputation`);
 };
+
+export const getAgentReputationHistory = async (
+  id: string,
+): Promise<import('../types/agent').ReputationHistory[]> => {
+  return apiClient.get<import('../types/agent').ReputationHistory[]>(`/api/agents/${id}/reputation/history`);
+};

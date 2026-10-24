@@ -38,7 +38,7 @@ use events::*;
 use migration::*;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    String, Vec,
+    String, Symbol, Vec,
 };
 pub use upgradeable::*;
 
@@ -118,6 +118,8 @@ pub enum DataKey {
     Proposal,
     /// Rollback information
     Rollback,
+    /// Migration plan for rollback execution (Issue #418)
+    RollbackPlan,
     /// Migration state during upgrade
     MigrationState,
     /// Contract-specific upgrade hooks
@@ -153,6 +155,8 @@ pub enum UpgradeError {
     InsufficientGasBudget = 11,
     /// Version downgrade not allowed without explicit rollback
     DowngradeNotAllowed = 12,
+    /// Down migration is irreversible and would cause data loss
+    IrreversibleMigration = 13,
 }
 
 /// Main upgrade manager contract
@@ -376,7 +380,7 @@ impl UpgradeManager {
 
         // Execute the upgrade
         env.deployer()
-            .update_current_contract_wasm(proposal.new_wasm_hash);
+            .update_current_contract_wasm(proposal.new_wasm_hash.clone());
 
         // Create new version record
         let new_version = ContractVersion {
@@ -407,7 +411,11 @@ impl UpgradeManager {
             env.storage()
                 .persistent()
                 .set(&DataKey::Rollback, &rollback_record);
+            env.storage()
+                .persistent()
+                .set(&DataKey::RollbackPlan, &proposal.migration_plan);
             extend_ttl_for_key(&env, &DataKey::Rollback);
+            extend_ttl_for_key(&env, &DataKey::RollbackPlan);
         }
 
         // Clean up proposal
@@ -434,8 +442,8 @@ impl UpgradeManager {
         Ok(())
     }
 
-    /// Rollback to the previous version (within 48h window)
-    pub fn rollback_upgrade(env: Env) -> Result<(), UpgradeError> {
+    /// Execute rollback to previous version with down migration (Issue #418)
+    pub fn execute_rollback(env: Env, unsafe_rollback: bool) -> Result<(), UpgradeError> {
         let admin = require_admin(&env)?;
 
         let rollback_record: RollbackRecord = env
@@ -454,6 +462,15 @@ impl UpgradeManager {
 
         let current_version = get_current_version(&env).unwrap();
 
+        // If a migration plan was recorded, execute down migration first (atomic with rollback)
+        if let Some(plan) = env
+            .storage()
+            .persistent()
+            .get::<_, MigrationPlan>(&DataKey::RollbackPlan)
+        {
+            migration::execute_down_migration(&env, &plan, unsafe_rollback)?;
+        }
+
         // Perform the rollback
         env.deployer()
             .update_current_contract_wasm(rollback_record.previous_version.wasm_hash.clone());
@@ -463,21 +480,37 @@ impl UpgradeManager {
             .persistent()
             .set(&DataKey::CurrentVersion, &rollback_record.previous_version);
 
-        // Disable further rollbacks
+        // Disable further rollbacks and clear plan
         env.storage().persistent().remove(&DataKey::Rollback);
+        env.storage().persistent().remove(&DataKey::RollbackPlan);
 
         extend_ttl_for_key(&env, &DataKey::CurrentVersion);
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("rollback")),
             UpgradeRolledBackEvent {
-                reverted_version: current_version.version,
-                restored_version: rollback_record.previous_version.version,
+                reverted_version: current_version.version.clone(),
+                restored_version: rollback_record.previous_version.version.clone(),
                 admin,
             },
         );
 
+        env.events().publish(
+            (Symbol::new(&env, "rollback_executed"),),
+            RollbackExecutedEvent {
+                contract_id: env.current_contract_address(),
+                from_version: current_version.version,
+                to_version: rollback_record.previous_version.version,
+                ledger: env.ledger().sequence(),
+            },
+        );
+
         Ok(())
+    }
+
+    /// Rollback to the previous version (within 48h window)
+    pub fn rollback_upgrade(env: Env) -> Result<(), UpgradeError> {
+        Self::execute_rollback(env, false)
     }
 
     /// Get rollback information (if available)
@@ -534,7 +567,7 @@ fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, BytesN, Env};
+    use soroban_sdk::{testutils::{Address as _, Ledger as _}, BytesN, Env};
 
     fn create_test_env() -> (Env, UpgradeManagerClient<'static>, Address) {
         let env = Env::default();
@@ -556,9 +589,8 @@ mod tests {
         let (env, client, admin) = create_test_env();
         let initial_hash = test_wasm_hash(&env, 1);
 
-        let result = client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
 
-        assert!(result.is_ok());
         assert_eq!(client.get_admin(), Some(admin));
 
         let version = client.get_current_version().unwrap();
@@ -592,8 +624,7 @@ mod tests {
 
         // Validate proposal
         let gas_estimate = client.validate_proposal();
-        assert!(gas_estimate.is_ok());
-        assert!(gas_estimate.unwrap() > 0);
+        assert!(gas_estimate > 0);
 
         // Execute upgrade
         let result = client.try_execute_upgrade();
@@ -682,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_gas_estimation() {
-        let (env, client, admin) = create_test_env();
+        let (env, client, _admin) = create_test_env();
 
         let mut migration_plan = MigrationPlan {
             pre_migration_checks: Vec::new(&env),
@@ -848,6 +879,112 @@ mod tests {
         // The current version must be the new one.
         let current = client.get_current_version().unwrap();
         assert_eq!(current.version, String::from_str(&env, "1.1.0"));
+    }
+
+    // ── Rollback Execution & Down Migration Tests (Issue #418) ───────────────
+
+    #[test]
+    fn test_execute_rollback_atomic_reversal() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        let mut transformations = Vec::new(&env);
+        transformations.push_back(String::from_str(&env, "migrate_agent_records"));
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: transformations,
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 10,
+        };
+
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "V2"),
+            &migration_plan,
+        );
+        client.validate_proposal();
+        client.execute_upgrade();
+
+        assert_eq!(client.get_current_version().unwrap().version, String::from_str(&env, "2.0.0"));
+
+        // Execute rollback within window
+        client.execute_rollback(&false);
+
+        // Verification: Current version atomically restored to 1.0.0
+        assert_eq!(client.get_current_version().unwrap().version, String::from_str(&env, "1.0.0"));
+        assert_eq!(client.get_current_version().unwrap().wasm_hash, initial_hash);
+    }
+
+    #[test]
+    fn test_rollback_blocked_on_irreversible_migration_without_unsafe_flag() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        let mut transformations = Vec::new(&env);
+        transformations.push_back(String::from_str(&env, "compress_storage")); // Irreversible!
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: transformations,
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "V2 Compressed"),
+            &migration_plan,
+        );
+        client.validate_proposal();
+        client.execute_upgrade();
+
+        // Rollback without unsafe_rollback flag is blocked with IrreversibleMigration!
+        let result = client.try_execute_rollback(&false);
+        assert_eq!(result, Err(Ok(UpgradeError::IrreversibleMigration)));
+
+        // Rollback WITH unsafe_rollback = true succeeds
+        client.execute_rollback(&true);
+        assert_eq!(client.get_current_version().unwrap().version, String::from_str(&env, "1.0.0"));
+    }
+
+    #[test]
+    fn test_execute_rollback_deadline_enforcement() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 0,
+        };
+
+        client.propose_upgrade(
+            &String::from_str(&env, "1.1.0"),
+            &new_hash,
+            &String::from_str(&env, "Patch"),
+            &migration_plan,
+        );
+        client.validate_proposal();
+        client.execute_upgrade();
+
+        // Advance ledger past 48h rollback deadline
+        let deadline = client.get_rollback_info().unwrap().rollback_deadline;
+        env.ledger().with_mut(|l| {
+            l.sequence_number = deadline + 1;
+        });
+
+        let result = client.try_execute_rollback(&false);
+        assert_eq!(result, Err(Ok(UpgradeError::RollbackDeadlineExpired)));
     }
 }
 

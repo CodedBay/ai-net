@@ -4,16 +4,16 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { CodingResult } from '../../types/agent';
 import { getCodeDetails } from '../../utils/agentUtils';
-import CopyButton from '../common/CopyButton';
 
 interface Props {
   result: CodingResult | null | undefined;
   searchQuery?: string;
 }
 
-const CodingRenderer: React.FC<Props> = ({ result }) => {
+const CodingRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
   const details = getCodeDetails(result);
+  const [copied, setCopied] = useState(false);
 
   if (!details || !details.code) {
     return (
@@ -53,21 +53,14 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
     );
   }
 
-  const containerStyle: React.CSSProperties = {
-    position: 'relative',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid var(--border-muted)',
-    backgroundColor: 'var(--surface-primary)',
-  };
-
-  const headerStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 16px',
-    backgroundColor: 'var(--surface-hover-subtle)',
-    borderBottom: '1px solid var(--border-muted)',
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(details.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy code to clipboard', err);
+    }
   };
 
   return (

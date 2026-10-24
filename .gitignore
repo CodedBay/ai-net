@@ -20,3 +20,4 @@ smart-contracts/testnet-farm-output/
 
 # Generated API documentation (built on CI and deployed to GitHub Pages)
 docs/api/
+docs/sdk-examples/python/__pycache__/

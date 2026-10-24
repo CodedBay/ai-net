@@ -13,6 +13,41 @@
   pointer-events: none;
 }
 
+/* icon element inside a toast */
+.toast__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* action button (e.g. "Retry") */
+.toast__action {
+  flex-shrink: 0;
+  appearance: none;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.toast__action:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* duplicate count badge */
+.toast__count {
+  font-weight: 700;
+  opacity: 0.8;
+  font-size: 0.85em;
+}
+
 /* — Toast shell: smooth enter/exit via framer-motion, fallback keyframes — */
 .toast {
   position: relative;

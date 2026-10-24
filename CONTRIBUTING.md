@@ -204,3 +204,9 @@ Before marking a PR as ready for review:
 ## 7. Agent & Contributor Guidelines
 
 For AI coding agents and automated contributors, refer to [AGENTS.md](AGENTS.md) for strict architectural rules, toolchain conventions, and repository standards.
+
+---
+
+## 8. New Contributor Onboarding
+
+First time contributing to ai-net? The **[Contributor Onboarding Checklist](docs/CONTRIBUTOR_CHECKLIST.md)** walks you from a fresh clone to a merged PR in checklist format, with time estimates, branch naming examples, commit message templates, and a table of common mistakes that block merge.

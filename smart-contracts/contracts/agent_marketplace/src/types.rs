@@ -2,6 +2,9 @@
 
 use soroban_sdk::{contracttype, Address, Symbol};
 
+pub const DEFAULT_LISTING_DURATION_LEDGERS: u32 = 518_400; // ~30 days at 5s/ledger
+pub const GRACE_PERIOD_LEDGERS: u32 = 120_960; // ~7 days at 5s/ledger
+
 /// On-chain representation of a service listing.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,6 +25,12 @@ pub struct ServiceListing {
     pub availability_hours: u32,
     /// Whether the listing is currently active.
     pub active: bool,
+    /// Ledger sequence when the listing expires.
+    pub expiry_ledger: u32,
+    /// Status: "active", "expired", etc.
+    pub status: Symbol,
+    /// Listing description metadata.
+    pub description: Symbol,
 }
 
 /// A service booking between a client and agent.
@@ -94,4 +103,21 @@ pub struct ServiceCompletedEvent {
 pub struct ServiceCancelledEvent {
     pub booking_id: Symbol,
     pub refund_amount: i128,
+}
+
+/// Event data for listing expiry.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListingExpiredEvent {
+    pub agent_id: Symbol,
+    pub capability: Symbol,
+    pub expiry_ledger: u32,
+}
+
+/// Event data for listing renewal.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListingRenewedEvent {
+    pub agent_id: Symbol,
+    pub new_expiry_ledger: u32,
 }

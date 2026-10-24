@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { createApp } from "../src/api";
 import { getTaskDb, closeTaskDb, createTaskDb } from "../src/db/tasks";
 import type { TaskStatus } from "../src/types/task";
+import { taskFactory } from "./factories";
 
 // Use in-memory SQLite for tests by monkey-patching getTaskDb
 let inMemoryDb: Database.Database;
@@ -78,8 +79,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: "", maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toBe("Validation failed");
-    expect(res.body.error.details.prompt).toBeDefined();
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.body.prompt).toBeDefined();
   });
 
   it("returns 400 when prompt exceeds 10 000 characters", async () => {
@@ -90,8 +91,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: oversizedPrompt, maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.message).toBe("Validation failed");
-    expect(res.body.error.details.prompt).toBeDefined();
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.body.prompt).toBeDefined();
   });
 
   it("accepts a prompt of exactly 10 000 characters", async () => {
@@ -155,7 +156,7 @@ describe("GET /api/tasks/:id", () => {
       .get(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error.message).toBe("Access denied");
+    expect(res.body.error).toBe("Access denied");
   });
 
   it("returns 403 when wallet key header is missing", async () => {
@@ -168,7 +169,7 @@ describe("GET /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .get(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error.message).toBe("Access denied");
+    expect(res.body.error).toBe("Access denied");
   });
 });
 
@@ -222,7 +223,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error.message).toBe("Not authorized to cancel this task");
+    expect(res.body.error).toBe("Not authorized to cancel this task");
   });
 
   it("returns 403 when wallet key header is missing on cancel", async () => {
@@ -235,7 +236,7 @@ describe("DELETE /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .delete(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error.message).toBe("Not authorized to cancel this task");
+    expect(res.body.error).toBe("Not authorized to cancel this task");
   });
 
   it("returns 409 when task is not queued (e.g. running)", async () => {
@@ -252,7 +253,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error.message).toBe("Cannot cancel task in 'running' status");
+    expect(res.body.error).toBe("Cannot cancel task in 'running' status");
   });
 
   it("returns 409 when task is completed", async () => {
@@ -269,7 +270,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error.message).toBe("Cannot cancel task in 'completed' status");
+    expect(res.body.error).toBe("Cannot cancel task in 'completed' status");
   });
 
   it("returns 404 for unknown task", async () => {
@@ -360,15 +361,14 @@ describe("GET /api/tasks (filtering, sorting, search)", () => {
     ];
 
     for (const t of seedTasks) {
-      db.insert({
+      db.insert(taskFactory.create({
         id: t.id,
         prompt: t.prompt,
         walletPublicKey: wallet,
         status: t.status,
-        dag: [],
         createdAt: new Date(now - t.minutesAgo * 60_000).toISOString(),
         updatedAt: new Date().toISOString(),
-      });
+      }));
     }
   });
 

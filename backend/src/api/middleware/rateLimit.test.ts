@@ -73,7 +73,7 @@ describe("429 when limit is exhausted", () => {
     const res = await request(app).get("/ping"); // 3 — should be blocked
 
     expect(res.status).toBe(429);
-    expect(res.body.error.code).toBe("RATE_LIMITED");
+    expect(res.body.error.code).toBe("RATE_LIMIT_EXCEEDED");
     expect(res.body.error.message).toMatch(/too many requests/i);
   });
 
@@ -248,7 +248,7 @@ describe("createVeniceProxyLimiter", () => {
       .set("walletpublickey", walletKey);
 
     expect(res.status).toBe(429);
-    expect(res.body.error.code).toBe("RATE_LIMITED");
+    expect(res.body.error.code).toBe("RATE_LIMIT_EXCEEDED");
     expect(res.headers["retry-after"]).toBeDefined();
   });
 });

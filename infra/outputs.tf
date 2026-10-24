@@ -23,6 +23,16 @@ output "redis_backups_bucket" {
   value       = module.s3.redis_backups_bucket_name
 }
 
+output "database_backups_bucket" {
+  description = "S3 bucket name for SQLite database backups (90-day retention)"
+  value       = module.s3.database_backups_bucket_name
+}
+
+output "backup_verification_bucket" {
+  description = "Isolated S3 bucket for weekly synthetic backup verification artifacts"
+  value       = module.s3.backup_verification_bucket_name
+}
+
 output "rds_endpoint" {
   description = "RDS PostgreSQL endpoint"
   value       = module.rds.db_endpoint

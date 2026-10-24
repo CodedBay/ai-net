@@ -12,6 +12,15 @@
   margin-bottom: 20px;
 }
 
+.searchSection {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .title {
   font-size: 1.8rem;
   font-weight: 700;
@@ -105,4 +114,336 @@
   grid-template-columns: repeat(6, 1fr);
   gap: 1rem;
   padding: 0 16px;
+}
+
+.marketplaceLayout {
+  min-width: 0;
+}
+
+.filterSidebar {
+  display: none;
+}
+
+.marketplaceResults {
+  min-width: 0;
+}
+
+.resultsToolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 8px;
+}
+
+.tabletFilterButton,
+.mobileSortButton,
+.desktopSortControl,
+.floatingFilterButton,
+.compareAction {
+  display: none;
+}
+
+.desktopSortControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.desktopSortControl select {
+  min-width: 190px;
+  min-height: 44px;
+  padding: 8px 32px 8px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-glass-subtle);
+  color: var(--text-primary);
+}
+
+.sheetBackdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(12 18 27 / 52%);
+}
+
+.mobileSheet {
+  position: fixed;
+  z-index: 1001;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  height: 50dvh;
+  max-height: 90dvh;
+  padding: 8px 18px max(16px, env(safe-area-inset-bottom));
+  border: 1px solid var(--panel-border);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  background: var(--surface-primary, var(--surface));
+  box-shadow: 0 -12px 40px rgb(0 0 0 / 20%);
+  transition: height 180ms ease;
+}
+
+.mobileSheetExpanded {
+  height: 90dvh;
+}
+
+.sheetHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.sheetHandle span {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.sheetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.sheetHeader h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.sheetClose,
+.compareTray button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.sheetContent {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-top: 16px;
+}
+
+.sortOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.compareContent {
+  overflow-x: auto;
+}
+
+.compareRow {
+  display: grid;
+  grid-template-columns: minmax(84px, 0.55fr) repeat(2, minmax(120px, 1fr));
+  gap: 12px;
+  min-width: 360px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.compareRow > :first-child {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.compareTray {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .marketplaceLayout {
+    display: grid;
+    grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
+    align-items: start;
+    gap: 28px;
+  }
+
+  .filterSidebar {
+    display: block;
+    position: sticky;
+    top: 24px;
+    align-self: start;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .filterSidebarOpen {
+    display: block;
+    margin-bottom: 20px;
+    padding: 16px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-lg, 8px);
+  }
+
+  .tabletFilterButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 112px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-glass-subtle);
+    color: var(--text-primary);
+  }
+
+  .resultsToolbar {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .page {
+    padding: 16px 12px 100px;
+  }
+
+  .header {
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .title {
+    font-size: 1.45rem;
+  }
+
+  .marketplaceLayout {
+    display: block;
+  }
+
+  .filterSidebar {
+    display: none;
+  }
+
+  .resultsToolbar {
+    justify-content: flex-end;
+    min-height: 48px;
+  }
+
+  .desktopSortControl {
+    display: none;
+  }
+
+  .mobileSortButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    max-width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface-glass-subtle);
+    color: var(--text-primary);
+    font-size: 0.84rem;
+  }
+
+  .floatingFilterButton {
+    position: fixed;
+    z-index: 900;
+    right: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent-info);
+    color: var(--text-inverse);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    font-weight: 700;
+  }
+
+  .compareTray {
+    position: fixed;
+    z-index: 899;
+    right: 12px;
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 68px);
+    left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 6px 8px 6px 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-lg, 8px);
+    background: var(--surface-primary, var(--surface));
+    box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+    color: var(--text-primary);
+    font-size: 0.83rem;
+  }
+
+  .compareTray > span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .compareAction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 0 !important;
+    border-radius: var(--radius-md, 8px);
+    background: var(--accent-info) !important;
+    color: var(--text-inverse) !important;
+    font-weight: 700;
+  }
+
+  .sheetHandle,
+  .sheetClose,
+  .sortOption,
+  .floatingFilterButton,
+  .compareTray button {
+    min-height: 44px;
+  }
+
+  .retryButton,
+  .viewToggleBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

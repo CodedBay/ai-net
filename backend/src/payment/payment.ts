@@ -18,8 +18,10 @@ import { tracingService } from "../services/tracing";
 import { currentTraceId } from "../services/traceContext";
 import { getConfig } from "../config";
 import { SequenceNumberManager } from "./sequenceManager";
+import { metricsService } from "../services/metrics";
 
 const MAX_RETRIES = 5;
+const MAX_SEQUENCE_CONFLICT_RETRIES = 3;
 
 /**
  * Determines whether a Horizon submission error is safe to retry.
@@ -87,7 +89,7 @@ function isBadSeq(err: unknown): boolean {
         };
       }
     )?.response?.data?.extras?.result_codes?.transaction ?? "";
-  return extras === "tx_bad_seq";
+  return extras === "tx_bad_seq" || /tx_bad_seq|bad sequence/i.test(String((err as { message?: string })?.message ?? ""));
 }
 
 export interface PaymentServiceHooks {
@@ -170,7 +172,7 @@ export class PaymentService {
       : null;
 
     try {
-      const balanceId = await this.sequenceManager.withAccount(
+      const balanceId = await this.withSequenceRetry(
         coordinatorKeypair.publicKey(),
         async () => {
           const amountStroops = xlmToStroops(amountXLM);
@@ -210,14 +212,7 @@ export class PaymentService {
             return bid;
           };
 
-          let bid: string;
-          try {
-            bid = await buildAndSubmit();
-          } catch (err) {
-            if (!isBadSeq(err)) throw err;
-            // Sequence number conflict — reload account and retry once.
-            bid = await buildAndSubmit();
-          }
+          const bid = await buildAndSubmit();
 
           this.db.insert({
             taskId,
@@ -229,7 +224,7 @@ export class PaymentService {
           });
 
           return bid;
-        }
+        },
       );
 
       if (span) tracingService.endSpan(span.spanId, 'completed', { balanceId });
@@ -275,24 +270,22 @@ export class PaymentService {
       : null;
 
     try {
-      const account = await withRetry(() =>
-        this.server.loadAccount(coordinatorKeypair.publicKey())
+      const txHash = await this.withSequenceRetry(
+        coordinatorKeypair.publicKey(),
+        async () => {
+          const account = await withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()));
+          const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: this.networkPassphrase,
+          })
+            .addOperation(Operation.claimClaimableBalance({ balanceId: record.balanceId }))
+            .setTimeout(30)
+            .build();
+          tx.sign(coordinatorKeypair);
+          const result = await withRetry(() => this.server.submitTransaction(tx));
+          return (result as unknown as { hash: string }).hash;
+        },
       );
-
-      const tx = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: this.networkPassphrase,
-      })
-        .addOperation(
-          Operation.claimClaimableBalance({ balanceId: record.balanceId })
-        )
-        .setTimeout(30)
-        .build();
-
-      tx.sign(coordinatorKeypair);
-
-      const result = await withRetry(() => this.server.submitTransaction(tx));
-      const txHash = (result as unknown as { hash: string }).hash;
 
       this.db.updateStatus(taskId, nodeId, "released", txHash);
 
@@ -338,24 +331,22 @@ export class PaymentService {
       throw new PaymentAlreadyReleasedError(taskId, nodeId);
     }
 
-    const account = await withRetry(() =>
-      this.server.loadAccount(coordinatorKeypair.publicKey())
+    const txHash = await this.withSequenceRetry(
+      coordinatorKeypair.publicKey(),
+      async () => {
+        const account = await withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()));
+        const tx = new TransactionBuilder(account, {
+          fee: BASE_FEE,
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(Operation.claimClaimableBalance({ balanceId: record.balanceId }))
+          .setTimeout(30)
+          .build();
+        tx.sign(coordinatorKeypair);
+        const result = await withRetry(() => this.server.submitTransaction(tx));
+        return (result as unknown as { hash: string }).hash;
+      },
     );
-
-    const tx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: this.networkPassphrase,
-    })
-      .addOperation(
-        Operation.claimClaimableBalance({ balanceId: record.balanceId })
-      )
-      .setTimeout(30)
-      .build();
-
-    tx.sign(coordinatorKeypair);
-
-    const result = await withRetry(() => this.server.submitTransaction(tx));
-    const txHash = (result as unknown as { hash: string }).hash;
 
     this.db.updateStatus(taskId, nodeId, "refunded", txHash);
     return txHash;
@@ -370,5 +361,21 @@ export class PaymentService {
    */
   getPaymentStatus(taskId: string, nodeId: string): PaymentRecord | undefined {
     return this.db.findByKey(taskId, nodeId);
+  }
+
+  private withSequenceRetry<T>(publicKey: string, submit: () => Promise<T>): Promise<T> {
+    return this.sequenceManager.withAccount(publicKey, async () => {
+      let retries = 0;
+      while (true) {
+        try {
+          return await submit();
+        } catch (error) {
+          if (!isBadSeq(error)) throw error;
+          metricsService.recordStellarSequenceConflict();
+          if (retries >= MAX_SEQUENCE_CONFLICT_RETRIES) throw error;
+          retries += 1;
+        }
+      }
+    });
   }
 }

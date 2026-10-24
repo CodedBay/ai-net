@@ -32,6 +32,26 @@ resource "aws_s3_bucket_policy" "frontend" {
 
 # ── CloudFront Distribution ───────────────────────────────────────────────────
 
+resource "aws_cloudfront_cache_policy" "html" {
+  name        = "ai-net-${var.environment}-html-no-cache"
+  comment     = "Always revalidate frontend HTML documents"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "frontend" {
   comment             = "ai-net ${var.environment} frontend CDN"
   enabled             = true
@@ -54,8 +74,19 @@ resource "aws_cloudfront_distribution" "frontend" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    cache_policy_id          = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+    cache_policy_id          = aws_cloudfront_cache_policy.html.id
     origin_request_policy_id = "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf" # Managed-CORS-S3Origin
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "assets/*"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-frontend"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
   }
 
   # SPA routing: redirect 403/404 back to index.html

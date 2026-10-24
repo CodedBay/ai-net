@@ -10,6 +10,7 @@ import type { PoolMetrics } from "./pool";
 import { currentPaymentPool } from "./index";
 import { currentTaskPool } from "./tasks";
 import { currentAgentPool } from "./agents";
+import { currentEventsPool } from "./contractEvents";
 
 /** Per-database metrics, keyed by database name. Absent pools are omitted. */
 export type DatabasePoolMetrics = Record<string, PoolMetrics>;
@@ -26,6 +27,9 @@ export function databasePoolMetrics(): DatabasePoolMetrics {
 
   const agents = currentAgentPool();
   if (agents) metrics.agents = agents.metrics();
+
+  const events = currentEventsPool();
+  if (events) metrics.events = events.metrics();
 
   return metrics;
 }

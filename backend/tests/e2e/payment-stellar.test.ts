@@ -16,6 +16,7 @@
 
 import { createPaymentReleaseFn, type StellarReleasePaymentFn } from '../../src/payment';
 import { createTask, getTask } from '../../src/coordinator/taskStore';
+import { taskFactory } from '../factories';
 
 const runE2E = process.env.STELLAR_E2E === '1';
 // Conditional: skip each test in CI, run on STELLAR_E2E=1
@@ -42,16 +43,13 @@ describe('Stellar payment integration (STELLAR_E2E=1)', () => {
     process.env.STELLAR_COORDINATOR_SECRET = secret;
 
     // Register a dummy task so createPaymentReleaseFn can look it up
-    createTask({
+    createTask(taskFactory.create({
       id: taskId,
       prompt: 'e2e payment integration test',
       // The agent public key is derived from the same test keypair for simplicity
       walletPublicKey: require('@stellar/stellar-sdk').Keypair.fromSecret(secret).publicKey(),
       status: 'running',
-      dag: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
+    }));
   });
 
   afterAll(() => {

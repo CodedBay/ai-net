@@ -4,6 +4,7 @@ import type { AgentFilters, StatusFilter } from '../../utils/agentRegistry'
 import styles from './AgentFilterBar.module.css'
 
 interface AgentFilterBarProps {
+  variant?: 'sidebar' | 'sheet'
   filters: AgentFilters
   /** All capabilities available across the dataset. */
   availableCapabilities: string[]
@@ -15,6 +16,7 @@ interface AgentFilterBarProps {
 }
 
 export function AgentFilterBar({
+  variant = 'sidebar',
   filters,
   availableCapabilities,
   priceDomain,
@@ -49,10 +51,11 @@ export function AgentFilterBar({
     filters.priceMin != null ||
     filters.priceMax != null ||
     filters.status !== 'all' ||
-    filters.sortKey != null
+    filters.sortKey != null ||
+    Boolean(filters.searchQuery)
 
   return (
-    <div className={styles.bar}>
+    <div className={`${styles.bar} ${variant === 'sidebar' ? styles.sidebar : styles.sheet}`}>
       <div className={styles.group}>
         <span className={styles.groupLabel}>{t('common.capabilities')}</span>
         <div className={styles.capList} role="group" aria-label={t('a11y.filterByCapability')}>

@@ -17,6 +17,11 @@ updates:
       prefix-development: "chore"
       include: "scope"
     groups:
+      security-patch-minor:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch
       stellar-root:
         patterns:
           - "@stellar/*"
@@ -25,10 +30,6 @@ updates:
           - "jest*"
           - "ts-jest*"
           - "@types/jest*"
-    ignore:
-      # Major version bumps require manual review — too risky to auto-merge
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     reviewers:
       - "CodedSceptre/maintainers"
     open-pull-requests-limit: 10
@@ -50,6 +51,11 @@ updates:
       prefix-development: "chore(frontend)"
       include: "scope"
     groups:
+      security-patch-minor:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch
       stellar-frontend:
         patterns:
           - "@stellar/*"
@@ -81,9 +87,6 @@ updates:
           - "recharts"
           - "reactflow"
           - "react-markdown*"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     reviewers:
       - "CodedSceptre/maintainers"
     open-pull-requests-limit: 15
@@ -105,6 +108,11 @@ updates:
       prefix-development: "chore(backend)"
       include: "scope"
     groups:
+      security-patch-minor:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch
       stellar-backend:
         patterns:
           - "@stellar/*"
@@ -125,9 +133,6 @@ updates:
         patterns:
           - "better-sqlite3*"
           - "@types/better-sqlite3*"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     reviewers:
       - "CodedSceptre/maintainers"
     open-pull-requests-limit: 15
@@ -149,6 +154,11 @@ updates:
       prefix-development: "chore(contracts)"
       include: "scope"
     groups:
+      security-patch-minor:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch
       stellar-contracts:
         patterns:
           - "@stellar/*"
@@ -157,9 +167,6 @@ updates:
           - "jest*"
           - "ts-jest*"
           - "@types/jest*"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     reviewers:
       - "CodedSceptre/maintainers"
     open-pull-requests-limit: 10
@@ -181,6 +188,11 @@ updates:
       prefix-development: "chore(contracts)"
       include: "scope"
     groups:
+      security-patch-minor:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch
       soroban-sdk:
         patterns:
           - "soroban-sdk*"
@@ -188,9 +200,6 @@ updates:
       serde:
         patterns:
           - "serde*"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     reviewers:
       - "CodedSceptre/maintainers"
     open-pull-requests-limit: 10

@@ -308,6 +308,7 @@ If the backend returns `404`, make sure you registered the agent (`src/register.
 
 | Resource | Description |
 |---|---|
+| [SDK Examples](sdk-examples/python/README.md) | Runnable Python, LangChain, and browser JavaScript integrations |
 | [AI-Agent Integration Guide](ai-agent-integration-guide.md) | Full lifecycle: bonding, disputes, SLA enforcement |
 | [Developer Setup Guide](DEVELOPER_SETUP.md) | Local Stellar node, Docker Compose, CI setup |
 | [REST API Reference](API_REFERENCE.md) | All backend endpoints with curl examples |

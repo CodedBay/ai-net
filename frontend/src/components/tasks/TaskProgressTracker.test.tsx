@@ -14,7 +14,6 @@
  */
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import React from 'react';
 import { TaskProgressTracker } from './TaskProgressTracker';
 import type { TaskResponse } from '../../types/api';
 
@@ -34,7 +33,6 @@ vi.mock('../../hooks/useTaskWebSocket', () => ({
 }));
 
 import { apiClient } from '../../services/api';
-import { useTaskWebSocket } from '../../hooks/useTaskWebSocket';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

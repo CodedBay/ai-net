@@ -1,88 +1,77 @@
-/**
- * SequenceNumberManager — per-account promise-chain mutex for Stellar submissions.
- *
- * Stellar accounts have a monotonically-incrementing sequence number. When two
- * transactions are built from the same account concurrently they both read the
- * same sequence number and one of them will fail with `tx_bad_seq`. Serialising
- * all submissions for a given public key through a promise chain solves this at
- * zero CPU cost: there are no timers, no polling, and no blocking — each caller
- * simply awaits the previous caller's promise before proceeding.
- *
- * Usage:
- *   const mgr = new SequenceNumberManager();
- *   const result = await mgr.withAccount(publicKey, async () => {
- *     const account = await server.loadAccount(publicKey);
- *     const tx = buildTx(account);
- *     return server.submitTransaction(tx);
- *   });
- */
+import { randomUUID } from "crypto";
+
+export const SEQUENCE_LOCK_TTL_MS = 10_000;
+
+export interface RedisSequenceLockClient {
+  set(key: string, value: string, expiry: "PX", ttlMs: number, condition: "NX"): Promise<string | null>;
+  eval(script: string, numberOfKeys: number, key: string, value: string): Promise<unknown>;
+}
+
+const RELEASE_LOCK_SCRIPT = `
+  if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+  end
+  return 0
+`;
+
+function createRedisClient(): RedisSequenceLockClient | undefined {
+  if (process.env.NODE_ENV === "test") return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Redis = require("ioredis") as new (url: string, options: Record<string, unknown>) => RedisSequenceLockClient;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getConfig } = require("../config") as typeof import("../config");
+  return new Redis(getConfig().REDIS_URL, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+  });
+}
+
+/** Serializes Stellar submissions per account, with a Redis lease across processes. */
 export class SequenceNumberManager {
-  /**
-   * Tracks the tail of each account's execution queue.
-   * Key   : Stellar public key (G…)
-   * Value : promise that resolves when the current head of the queue finishes.
-   */
-  private locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new Map<string, Promise<void>>();
+  private readonly redis: RedisSequenceLockClient | undefined;
 
-  /**
-   * Enqueue `fn` for `publicKey`.  `fn` will not start until every previously
-   * enqueued function for the same key has settled.
-   *
-   * @param publicKey  Stellar public key identifying the source account.
-   * @param fn         Async work to serialize (load account → build → submit).
-   * @returns          Whatever `fn` resolves with.
-   */
-  withAccount<T>(publicKey: string, fn: () => Promise<T>): Promise<T> {
-    // Preserve FIFO ordering per source account by chaining each task behind the
-    // previous task and only releasing the next caller once the current result has
-    // actually been consumed by a .then/.catch/await handler.
+  constructor(redisClient?: RedisSequenceLockClient | null) {
+    this.redis = redisClient === null ? undefined : redisClient ?? createRedisClient();
+  }
+
+  async withAccount<T>(publicKey: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(publicKey) ?? Promise.resolve();
-    const queued = previous.then(() => fn());
-
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
+    const current = new Promise<void>((resolve) => {
       release = resolve;
     });
+    this.locks.set(publicKey, current);
 
-    // Publish the gate as the current tail so the next caller won't proceed until
-    // the previous task's result has been handled.
-    this.locks.set(publicKey, gate);
-
-    const finalize = () => {
+    await previous;
+    try {
+      return this.redis
+        ? await this.withRedisLock(publicKey, fn)
+        : await fn();
+    } finally {
       release();
-      if (this.locks.get(publicKey) === gate) {
-        this.locks.delete(publicKey);
+      if (this.locks.get(publicKey) === current) this.locks.delete(publicKey);
+    }
+  }
+
+  private async withRedisLock<T>(publicKey: string, fn: () => Promise<T>): Promise<T> {
+    const key = `stellar:sequence:${publicKey}`;
+    const token = randomUUID();
+    const deadline = Date.now() + SEQUENCE_LOCK_TTL_MS;
+
+    while (Date.now() < deadline) {
+      const acquired = await this.redis!.set(key, token, "PX", SEQUENCE_LOCK_TTL_MS, "NX");
+      if (acquired === "OK") {
+        try {
+          return await fn();
+        } finally {
+          await this.redis!.eval(RELEASE_LOCK_SCRIPT, 1, key, token).catch(() => undefined);
+        }
       }
-    };
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
 
-    const wrapped: Promise<T> = {
-      then: (onFulfilled, onRejected) =>
-        queued.then(
-          (value) => {
-            const next: any = onFulfilled ? onFulfilled(value) : value;
-            finalize();
-            return next;
-          },
-          (error) => {
-            const next: any = onRejected ? onRejected(error) : Promise.reject(error);
-            finalize();
-            return next;
-          }
-        ),
-      catch: (onRejected) =>
-        queued.catch((error) => {
-          const next: any = onRejected ? onRejected(error) : Promise.reject(error);
-          finalize();
-          return next;
-        }),
-      finally: (onFinally) =>
-        queued.finally(() => {
-          const next: any = onFinally ? onFinally() : undefined;
-          finalize();
-          return next;
-        }),
-    } as Promise<T>;
-
-    return wrapped;
+    throw new Error(`Timed out acquiring Stellar sequence lock for ${publicKey}`);
   }
 }

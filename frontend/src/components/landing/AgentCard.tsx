@@ -1,9 +1,9 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { formatNumber } from '../../utils/format'
-import { cardEntrance } from '../../utils/animationPresets'
-import { Star } from 'lucide-react'
+import { agentCardPress, cardEntrance, selectionBadge } from '../../utils/animationPresets'
+import { Check, Star } from 'lucide-react'
 
 export interface AgentData {
   id: string
@@ -22,6 +22,8 @@ export interface AgentData {
 interface AgentCardProps {
   agent: AgentData
   index: number
+  selected?: boolean
+  onSelect?: (agent: AgentData) => void
 }
 
 function formatHeartbeatAge(lastHeartbeat?: number): string {
@@ -110,20 +112,46 @@ function ReputationStars({ rating }: { rating: number }) {
   )
 }
 
-const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
+const AgentCard: React.FC<AgentCardProps> = ({ agent, index, selected = false, onSelect }) => {
   const { t, i18n } = useTranslation()
+  const prefersReducedMotion = useReducedMotion()
   const isOnline = agent.isOnline ?? true
   const capabilities = agent.capabilities ?? []
 
   return (
     <motion.div
-      className="bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col cursor-pointer group relative overflow-hidden"
-      variants={cardEntrance(index)}
-      initial="hidden"
-      whileInView="visible"
+      className={`agent-card-interactive bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col group relative overflow-hidden ${onSelect ? 'cursor-pointer' : ''} ${selected ? 'agent-card-selected' : ''}`}
+      variants={prefersReducedMotion ? undefined : cardEntrance(index)}
+      initial={prefersReducedMotion ? false : 'hidden'}
+      whileInView={prefersReducedMotion ? undefined : 'visible'}
       viewport={{ once: true, margin: '-30px' }}
-      whileHover={{ y: -4 }}
+      whileHover={prefersReducedMotion ? undefined : { y: -2, transition: { duration: 0.15, ease: 'easeOut' } }}
+      whileTap={onSelect && !prefersReducedMotion ? agentCardPress : undefined}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-pressed={onSelect ? selected : undefined}
+      onClick={onSelect ? () => onSelect(agent) : undefined}
+      onKeyDown={onSelect ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect(agent)
+        }
+      } : undefined}
     >
+      <AnimatePresence>
+        {selected && (
+          <motion.span
+            className="agent-card-selection-badge"
+            variants={prefersReducedMotion ? undefined : selectionBadge}
+            initial={prefersReducedMotion ? false : 'hidden'}
+            animate="visible"
+            exit={prefersReducedMotion ? undefined : 'exit'}
+            aria-label="Selected for comparison"
+          >
+            <Check size={14} aria-hidden="true" />
+          </motion.span>
+        )}
+      </AnimatePresence>
       <div className="absolute inset-0 bg-gradient-primary opacity-0 group-hover:opacity-[0.03] transition-opacity duration-500" />
       <div className="absolute -inset-px rounded-2xl border border-accent-cyan/0 group-hover:border-accent-cyan/30 transition-all duration-500 pointer-events-none" />
 

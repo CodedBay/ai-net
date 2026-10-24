@@ -8,6 +8,9 @@ members = [
     "contracts/upgrade-manager",
     "contracts/task_store",
     "contracts/payment_escrow",
+    "contracts/multisig_governance",
+    "contracts/platform_config",
+    "contracts/agent_marketplace",
 ]
 resolver = "2"
 

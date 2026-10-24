@@ -160,6 +160,15 @@ pub struct AgentPage {
     pub total_count: u32,
 }
 
+/// Keyset-paginated agent listing response.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentCursorPage {
+    pub agents: Vec<AgentRecord>,
+    pub next_cursor: Option<Symbol>,
+    pub total_count: u32,
+}
+
 /// Aggregate view of an agent's standing, including its error count as
 /// tracked by error-resolver. `error_count` is 0 whenever error-resolver
 /// isn't configured or the cross-contract call fails, rather than causing
@@ -286,7 +295,9 @@ pub enum DataKey {
     SlaViolationCount(Symbol),
     // Pagination keys (issue #339)
     AgentByIndex(u32),
+    AgentSequence(Symbol),
     RegistrationSequence,
+    MaxPageSize,
     // Cross-chain bridging keys (issue #259)
     /// Bridge proof for an agent on one target chain.
     BridgeProof(Symbol, TargetChain),
@@ -362,6 +373,14 @@ fn get_registration_sequence(env: &Env) -> u32 {
         .instance()
         .get(&DataKey::RegistrationSequence)
         .unwrap_or(0)
+}
+
+fn get_max_page_size(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::MaxPageSize)
+        .unwrap_or(MAX_PAGE_SIZE)
+        .min(MAX_PAGE_SIZE)
 }
 
 fn get_capability_index(env: &Env, capability: &Symbol) -> Vec<Symbol> {
@@ -1066,8 +1085,11 @@ impl AgentRegistryContract {
 
         let seq = get_registration_sequence(&env);
         let index_key = DataKey::AgentByIndex(seq);
+        let sequence_key = DataKey::AgentSequence(record.id.clone());
         env.storage().persistent().set(&index_key, &record.id);
+        env.storage().persistent().set(&sequence_key, &seq);
         extend_ttl_for_existing_key(&env, &index_key);
+        extend_ttl_for_existing_key(&env, &sequence_key);
         env.storage()
             .instance()
             .set(&DataKey::RegistrationSequence, &(seq + 1));
@@ -1257,6 +1279,7 @@ impl AgentRegistryContract {
             let record = agents.get(i).unwrap();
             let agent_key = DataKey::Agent(record.id.clone());
             let index_key = DataKey::AgentByIndex(seq);
+            let sequence_key = DataKey::AgentSequence(record.id.clone());
 
             let mut cap_ids = if let Some(ids) =
                 updated_cap_indexes.get(record.capability.clone())
@@ -1271,8 +1294,10 @@ impl AgentRegistryContract {
 
             env.storage().persistent().set(&agent_key, &record);
             env.storage().persistent().set(&index_key, &record.id);
+            env.storage().persistent().set(&sequence_key, &seq);
             ttl_keys.push_back(agent_key);
             ttl_keys.push_back(index_key);
+            ttl_keys.push_back(sequence_key);
             seq += 1;
 
             // Emit one (registry, agent_registered) event per committed agent.
@@ -1395,6 +1420,60 @@ impl AgentRegistryContract {
             agents,
             next_cursor,
             total_count: total_active,
+        }
+    }
+
+    /// List agents in deterministic registration order using the last agent ID as a keyset cursor.
+    pub fn list_agents(env: Env, cursor: Option<Symbol>, limit: u32) -> AgentCursorPage {
+        let max_page_size = get_max_page_size(&env).max(1);
+        let requested_limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
+        let effective_limit = requested_limit.min(max_page_size).min(MAX_PAGE_SIZE);
+        let total_registered = get_registration_sequence(&env);
+        let total_count = get_total_agents(&env);
+
+        let mut current_idx = match cursor {
+            Some(agent_id) => {
+                let sequence_key = DataKey::AgentSequence(agent_id);
+                let Some(sequence) = env.storage().persistent().get::<_, u32>(&sequence_key) else {
+                    return AgentCursorPage {
+                        agents: Vec::new(&env),
+                        next_cursor: None,
+                        total_count,
+                    };
+                };
+                extend_ttl_for_existing_key(&env, &sequence_key);
+                sequence.saturating_add(1)
+            }
+            None => 0,
+        };
+
+        let mut agents = Vec::new(&env);
+        let mut ttl_keys: Vec<DataKey> = Vec::new(&env);
+        let mut last_agent_id: Option<Symbol> = None;
+        let mut next_cursor = None;
+
+        while current_idx < total_registered {
+            let index_key = DataKey::AgentByIndex(current_idx);
+            if let Some(agent_id) = env.storage().persistent().get::<_, Symbol>(&index_key) {
+                let agent_key = DataKey::Agent(agent_id);
+                if let Some(record) = env.storage().persistent().get::<_, AgentRecord>(&agent_key) {
+                    if agents.len() == effective_limit {
+                        next_cursor = last_agent_id;
+                        break;
+                    }
+                    ttl_keys.push_back(agent_key);
+                    last_agent_id = Some(record.id.clone());
+                    agents.push_back(record);
+                }
+            }
+            current_idx += 1;
+        }
+
+        extend_ttl_batch_existing(&env, &ttl_keys);
+        AgentCursorPage {
+            agents,
+            next_cursor,
+            total_count,
         }
     }
 
@@ -2183,6 +2262,35 @@ impl AgentRegistryContract {
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
         audit::record(&env, &admin, symbol_short!("storecfg"), None, 0);
+        Ok(())
+    }
+
+    /// Read the configured maximum page size, capped by the contract hard limit.
+    pub fn max_page_size(env: Env) -> u32 {
+        get_max_page_size(&env)
+    }
+
+    /// Set the page-size cap; `0` restores the default and values above 50 are capped.
+    pub fn set_max_page_size(env: Env, max_page_size: u32) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let configured = if max_page_size == 0 {
+            DEFAULT_PAGE_SIZE
+        } else {
+            max_page_size.min(MAX_PAGE_SIZE)
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPageSize, &configured);
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(
+            &env,
+            &admin,
+            symbol_short!("pagesize"),
+            None,
+            configured as i128,
+        );
         Ok(())
     }
 

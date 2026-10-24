@@ -241,8 +241,8 @@ fn execute_passes_with_quorum_and_majority() {
 #[test]
 fn execute_fails_without_quorum() {
     let (env, client) = setup();
-    // Ten voters; only one votes → 10% turnout, below 30% quorum.
-    let voters: std::vec::Vec<Address> = (0..10).map(|_| Address::generate(&env)).collect();
+    // Twenty voters; only one votes → 5% turnout, below 10% quorum.
+    let voters: std::vec::Vec<Address> = (0..20).map(|_| Address::generate(&env)).collect();
     for v in &voters {
         register(&client, v, 0, 10_000_000);
     }
@@ -252,7 +252,7 @@ fn execute_fails_without_quorum() {
     let p = client.get_proposal(&id).unwrap();
     env.ledger().set_timestamp(p.voting_ends_at + 1);
 
-    assert_eq!(client.execute_proposal(&id), ProposalStatus::Failed);
+    assert_eq!(client.execute_proposal(&id), ProposalStatus::QuorumFailed);
 }
 
 #[test]
@@ -403,13 +403,58 @@ fn full_proposal_lifecycle_all_types() {
     assert_eq!(client.get_proposal_count(), 3);
 }
 
+// ── Quorum & Voting Period Tests (Issue #408) ────────────────────────────
+
+#[test]
+fn test_configurable_quorum_and_voting_period() {
+    let (_env, client) = setup();
+    assert_eq!(client.get_voting_period_ledgers(), DEFAULT_VOTING_PERIOD_LEDGERS);
+    client.set_voting_period_ledgers(&20_160);
+    assert_eq!(client.get_voting_period_ledgers(), 20_160);
+
+    assert_eq!(client.get_quorum_threshold_bps(), 1_000);
+    client.set_quorum_threshold_bps(&2_500); // 25%
+    assert_eq!(client.get_quorum_threshold_bps(), 2_500);
+}
+
+#[test]
+fn test_voting_period_enforcement_with_ledger_sequence() {
+    let (env, client) = setup();
+    let voter = Address::generate(&env);
+    register(&client, &voter, 10, 10_000_000);
+
+    let id = new_proposal(&env, &client, &voter);
+    client.vote_on_proposal(&id, &voter, &VoteChoice::For);
+
+    let p = client.get_proposal(&id).unwrap();
+
+    // Advancing timestamp but keeping ledger sequence <= voting_end_ledger
+    // Still within voting period -> execute must fail!
+    env.ledger().with_mut(|l| {
+        l.timestamp = p.voting_ends_at + 100;
+        l.sequence_number = p.voting_end_ledger - 1;
+    });
+
+    assert_eq!(
+        client.try_execute_proposal(&id),
+        Err(Ok(Error::VotingPeriodActive))
+    );
+
+    // Advance ledger sequence past voting_end_ledger
+    env.ledger().with_mut(|l| {
+        l.sequence_number = p.voting_end_ledger + 1;
+    });
+
+    assert_eq!(client.execute_proposal(&id), ProposalStatus::Executed);
+}
+
 // ─── Timelock tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod timelock_tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::Ledger,
         Env, Symbol, Vec,
     };
 
@@ -423,8 +468,8 @@ mod timelock_tests {
         let contract_id = env.register(AgentGovernanceContract, ());
         let client = AgentGovernanceContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        client.initialize(&admin).unwrap();
-        client.initialize_timelock(&admin, &None).unwrap();
+        client.initialize(&admin);
+        client.initialize_timelock(&admin, &None);
         (env, client, admin)
     }
 
@@ -436,7 +481,7 @@ mod timelock_tests {
         // Execute after current + MIN_DELAY_LEDGERS
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
 
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
+        let change_id = client.propose_change(&admin, &param, &execute_after);
         assert_eq!(change_id, 1);
 
         let change = client.get_pending_change(&change_id).unwrap();
@@ -450,7 +495,7 @@ mod timelock_tests {
             l.sequence_number = execute_after + 1;
         });
 
-        client.execute_change(&admin, &change_id).unwrap();
+        client.execute_change(&admin, &change_id);
 
         let executed = client.get_pending_change(&change_id).unwrap();
         assert!(executed.executed);
@@ -463,10 +508,10 @@ mod timelock_tests {
         let param = Symbol::new(&env, "fee_rate");
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
 
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
+        let _change_id = client.propose_change(&admin, &param, &execute_after);
 
         // Try to execute before the delay elapses — should fail.
-        let result = client.try_execute_change(&admin, &change_id);
+        let result = client.try_execute_change(&admin, &_change_id);
         assert_eq!(result, Err(Ok(Error::TimelockActive)));
     }
 
@@ -477,8 +522,8 @@ mod timelock_tests {
         let param = Symbol::new(&env, "bond_min");
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
 
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
-        client.cancel_change(&admin, &change_id).unwrap();
+        let change_id = client.propose_change(&admin, &param, &execute_after);
+        client.cancel_change(&admin, &change_id);
 
         let change = client.get_pending_change(&change_id).unwrap();
         assert!(change.cancelled);
@@ -498,7 +543,7 @@ mod timelock_tests {
         let param = Symbol::new(&env, "timeout");
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
 
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
+        let change_id = client.propose_change(&admin, &param, &execute_after);
 
         // Advance ledger beyond CHANGE_EXPIRY_LEDGERS.
         env.ledger().with_mut(|l| {
@@ -528,24 +573,24 @@ mod timelock_tests {
             }
             v
         };
-        client.set_guardian_config(&admin, &guardians, &3).unwrap();
+        client.set_guardian_config(&admin, &guardians, &3);
 
         let current_ledger = env.ledger().sequence();
         let param = Symbol::new(&env, "quorum");
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
 
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
+        let change_id = client.propose_change(&admin, &param, &execute_after);
 
         // Collect 3 guardian approvals.
-        client.guardian_approve(&guardians.get(0).unwrap(), &change_id).unwrap();
-        client.guardian_approve(&guardians.get(1).unwrap(), &change_id).unwrap();
-        client.guardian_approve(&guardians.get(2).unwrap(), &change_id).unwrap();
+        client.guardian_approve(&guardians.get(0).unwrap(), &change_id);
+        client.guardian_approve(&guardians.get(1).unwrap(), &change_id);
+        client.guardian_approve(&guardians.get(2).unwrap(), &change_id);
 
         let change = client.get_pending_change(&change_id).unwrap();
         assert_eq!(change.guardian_approvals, 3);
 
         // Execute without advancing ledger (emergency fast-track).
-        client.execute_change(&admin, &change_id).unwrap();
+        client.execute_change(&admin, &change_id);
         let executed = client.get_pending_change(&change_id).unwrap();
         assert!(executed.executed);
     }
@@ -561,14 +606,14 @@ mod timelock_tests {
             }
             v
         };
-        client.set_guardian_config(&admin, &guardians, &3).unwrap();
+        client.set_guardian_config(&admin, &guardians, &3);
 
         let current_ledger = env.ledger().sequence();
         let param = Symbol::new(&env, "fee_rate");
         let execute_after = current_ledger + MIN_DELAY_LEDGERS;
-        let change_id = client.propose_change(&admin, &param, &execute_after).unwrap();
+        let change_id = client.propose_change(&admin, &param, &execute_after);
 
-        client.guardian_approve(&guardians.get(0).unwrap(), &change_id).unwrap();
+        client.guardian_approve(&guardians.get(0).unwrap(), &change_id);
         // Second approval from the same guardian must fail.
         let result = client.try_guardian_approve(&guardians.get(0).unwrap(), &change_id);
         assert_eq!(result, Err(Ok(Error::AlreadyApprovedByGuardian)));

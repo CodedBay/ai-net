@@ -1,0 +1,95 @@
+name: Dependabot automation
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '0 9 * * 1'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  enable-security-automerge:
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Read Dependabot update metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable squash auto-merge for minor and patch security updates
+        if: steps.metadata.outputs.alert-state == 'open' && (steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash --subject "chore(deps): update dependencies" --body "Automated Dependabot security update."
+
+  approve-security-update:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Find the Dependabot pull request for the successful CI run
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          PR_NUMBER="$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" --jq '[.[] | select(.user.login == "dependabot[bot]")][0].number // empty')"
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Read Dependabot update metadata
+        if: steps.pull-request.outputs.number != ''
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.pull-request.outputs.number }}
+
+      - name: Approve the security update after CI succeeds
+        if: steps.metadata.outputs.alert-state == 'open' && (steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_APPROVAL_TOKEN }}
+          PR_NUMBER: ${{ steps.pull-request.outputs.number }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "DEPENDABOT_APPROVAL_TOKEN is not configured; skipping approval."
+            exit 0
+          fi
+          gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve
+
+  weekly-digest:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Post weekly merged Dependabot digest to Slack
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+            echo "SLACK_WEBHOOK_URL is not configured; skipping digest."
+            exit 0
+          fi
+
+          since="$(date -u -d '7 days ago' +%Y-%m-%d)"
+          pull_requests="$(gh pr list --repo "$GITHUB_REPOSITORY" --state merged --search "author:app/dependabot merged:>=$since" --json number,title,url --limit 100)"
+          summary="$(jq -r 'if length == 0 then "No Dependabot updates were merged this week." else map("- <\(.url)|#\(.number) \(.title)>") | join("\n") end' <<< "$pull_requests")"
+          printf -v digest_text 'Weekly Dependabot updates for %s:\n%s' "$GITHUB_REPOSITORY" "$summary"
+          jq -n --arg text "$digest_text" '{text: $text}' \
+            | curl --fail-with-body --silent --show-error -X POST -H 'Content-Type: application/json' --data-binary @- "$SLACK_WEBHOOK_URL"

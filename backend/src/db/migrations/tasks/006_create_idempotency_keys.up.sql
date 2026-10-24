@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   status_code    INTEGER NOT NULL,
   created_at     TEXT NOT NULL,
   expires_at     TEXT NOT NULL,
+  request_hash   TEXT,
   PRIMARY KEY (key, wallet_address)
 );
 

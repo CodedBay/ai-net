@@ -197,3 +197,40 @@ export function fuzzyMatchFields(
 
   return best
 }
+
+export interface HighlightSegment {
+  text: string
+  matched: boolean
+}
+
+/**
+ * Splits `text` into matched and unmatched segments based on character-level indices.
+ * Used to render bold matches in suggestions.
+ */
+export function getHighlightSegments(text: string, indices: number[]): HighlightSegment[] {
+  if (!text) return []
+  if (!indices || indices.length === 0) return [{ text, matched: false }]
+
+  const indexSet = new Set(indices)
+  const segments: HighlightSegment[] = []
+  let currentMatched = indexSet.has(0)
+  let currentText = text[0]
+
+  for (let i = 1; i < text.length; i++) {
+    const isMatch = indexSet.has(i)
+    if (isMatch === currentMatched) {
+      currentText += text[i]
+    } else {
+      segments.push({ text: currentText, matched: currentMatched })
+      currentMatched = isMatch
+      currentText = text[i]
+    }
+  }
+
+  if (currentText) {
+    segments.push({ text: currentText, matched: currentMatched })
+  }
+
+  return segments
+}
+

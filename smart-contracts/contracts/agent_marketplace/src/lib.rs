@@ -26,6 +26,8 @@ pub enum DataKey {
     ListingsByCapability(Symbol),
     /// Oracle manager contract address for XLM/USD price resolution.
     OracleManager,
+    /// Default listing validity duration in ledgers.
+    ListingDurationLedgers,
 }
 
 #[contract]
@@ -127,6 +129,23 @@ impl AgentMarketplaceContract {
         }
     }
 
+    /// Admin: configure listing validity duration in ledgers (Issue #411).
+    pub fn set_listing_duration(env: Env, duration_ledgers: u32) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ListingDurationLedgers, &duration_ledgers);
+        Ok(())
+    }
+
+    /// Query current listing validity duration in ledgers (default: 518,400 / ~30 days).
+    pub fn get_listing_duration(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ListingDurationLedgers)
+            .unwrap_or(DEFAULT_LISTING_DURATION_LEDGERS)
+    }
+
     /// List a service on the marketplace.
     pub fn list_service(
         env: Env,
@@ -150,6 +169,9 @@ impl AgentMarketplaceContract {
             return Err(Error::AlreadyExists);
         }
 
+        let duration = Self::get_listing_duration(env.clone());
+        let expiry_ledger = env.ledger().sequence().saturating_add(duration);
+
         let listing = ServiceListing {
             listing_id: listing_id.clone(),
             agent_id: agent_id.clone(),
@@ -159,6 +181,9 @@ impl AgentMarketplaceContract {
             max_response_time,
             availability_hours,
             active: true,
+            expiry_ledger,
+            status: Symbol::new(&env, "active"),
+            description: capability.clone(),
         };
 
         env.storage().persistent().set(&key, &listing);
@@ -186,6 +211,80 @@ impl AgentMarketplaceContract {
         Ok(())
     }
 
+    /// Renew an agent listing before it is purged from storage (Issue #411).
+    pub fn renew_listing(env: Env, listing_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let key = DataKey::ServiceListing(listing_id.clone());
+        let mut listing: ServiceListing = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::NotFound)?;
+
+        listing.owner.require_auth();
+
+        let current_ledger = env.ledger().sequence();
+        if current_ledger > listing.expiry_ledger.saturating_add(GRACE_PERIOD_LEDGERS) {
+            env.storage().persistent().remove(&key);
+            return Err(Error::NotFound);
+        }
+
+        let duration = Self::get_listing_duration(env.clone());
+        listing.expiry_ledger = current_ledger.saturating_add(duration);
+        listing.active = true;
+        listing.status = Symbol::new(&env, "active");
+        env.storage().persistent().set(&key, &listing);
+
+        env.events().publish(
+            (Symbol::new(&env, "listing_renewed"),),
+            ListingRenewedEvent {
+                agent_id: listing.agent_id,
+                new_expiry_ledger: listing.expiry_ledger,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Update listing metadata (price, description, SLAs) without full re-listing (Issue #411).
+    pub fn update_listing_metadata(
+        env: Env,
+        listing_id: Symbol,
+        new_price: Option<i128>,
+        new_description: Option<Symbol>,
+        new_response_time: Option<u32>,
+        new_availability: Option<u32>,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let key = DataKey::ServiceListing(listing_id.clone());
+        let mut listing: ServiceListing = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::NotFound)?;
+
+        listing.owner.require_auth();
+
+        if let Some(price) = new_price {
+            if price <= 0 {
+                return Err(Error::InvalidPrice);
+            }
+            listing.price_stroops = price;
+        }
+        if let Some(desc) = new_description {
+            listing.description = desc;
+        }
+        if let Some(rt) = new_response_time {
+            listing.max_response_time = rt;
+        }
+        if let Some(avail) = new_availability {
+            listing.availability_hours = avail;
+        }
+
+        env.storage().persistent().set(&key, &listing);
+        Ok(())
+    }
+
     /// Search for services by capability with optional filters.
     pub fn search_services(
         env: Env,
@@ -200,14 +299,25 @@ impl AgentMarketplaceContract {
             .get(&cap_key)
             .unwrap_or_else(|| Vec::new(&env));
 
+        let current_ledger = env.ledger().sequence();
         let mut results = Vec::new(&env);
         for id in ids.iter() {
             let key = DataKey::ServiceListing(id);
-            if let Some(listing) = env
+            if let Some(mut listing) = env
                 .storage()
                 .persistent()
                 .get::<_, ServiceListing>(&key)
             {
+                if current_ledger > listing.expiry_ledger.saturating_add(GRACE_PERIOD_LEDGERS) {
+                    env.storage().persistent().remove(&key);
+                    continue;
+                }
+                if current_ledger > listing.expiry_ledger {
+                    listing.active = false;
+                    listing.status = Symbol::new(&env, "expired");
+                    env.storage().persistent().set(&key, &listing);
+                    continue;
+                }
                 if !listing.active {
                     continue;
                 }
@@ -428,11 +538,33 @@ impl AgentMarketplaceContract {
         Ok(())
     }
 
-    /// Get a service listing.
+    /// Get a service listing. Evaluates expiry and grace period purging (Issue #411).
     pub fn get_listing(env: Env, listing_id: Symbol) -> Option<ServiceListing> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ServiceListing(listing_id))
+        let key = DataKey::ServiceListing(listing_id);
+        let mut listing: ServiceListing = env.storage().persistent().get(&key)?;
+        let current_ledger = env.ledger().sequence();
+
+        if current_ledger > listing.expiry_ledger.saturating_add(GRACE_PERIOD_LEDGERS) {
+            env.storage().persistent().remove(&key);
+            return None;
+        }
+
+        if current_ledger > listing.expiry_ledger {
+            listing.active = false;
+            listing.status = Symbol::new(&env, "expired");
+            env.storage().persistent().set(&key, &listing);
+
+            env.events().publish(
+                (Symbol::new(&env, "listing_expired"),),
+                ListingExpiredEvent {
+                    agent_id: listing.agent_id.clone(),
+                    capability: listing.capability.clone(),
+                    expiry_ledger: listing.expiry_ledger,
+                },
+            );
+        }
+
+        Some(listing)
     }
 
     /// Get a booking.

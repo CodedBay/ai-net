@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "fs/promises";
 import os from "os";
 import path from "path";
 import { createTaskDb } from "../db/tasks";
-import { TaskResultStorageService } from "./taskResultStorage";
+import { TaskResultStorageService, type TaskResultArchiveStore } from "./taskResultStorage";
 
 function createDb() {
   const database = new Database(":memory:");
@@ -18,7 +18,12 @@ function createDb() {
       updatedAt TEXT NOT NULL,
       result TEXT,
       resultFile TEXT,
-      resultExpiresAt TEXT
+      resultExpiresAt TEXT,
+      resultEncoding TEXT NOT NULL DEFAULT 'identity',
+      resultStatus TEXT NOT NULL DEFAULT 'inline',
+      resultSummary TEXT,
+      resultArchiveKey TEXT,
+      resultArchiveAt TEXT
     )
   `);
   const db = createTaskDb(database);
@@ -75,9 +80,42 @@ describe("TaskResultStorageService", () => {
     expect(await storage.readSignedFile("task-result-test", Date.now(), "bad")).toBeUndefined();
 
     const resultFile = db.getResult("task-result-test")!.resultFile!;
-    await storage.cleanupExpired(new Date(Date.now() + 31 * 24 * 60 * 60 * 1000));
+    await storage.cleanupExpired(new Date(Date.now() + 366 * 24 * 60 * 60 * 1000));
     await expect(readFile(resultFile)).rejects.toThrow();
     expect(db.getResult("task-result-test")!.result).toBeNull();
+    database.close();
+  });
+
+  it("compresses large inline results, archives after 30 days, and expires after one year", async () => {
+    const { database, db } = createDb();
+    const objects = new Map<string, Buffer>();
+    const archiveStore: TaskResultArchiveStore = {
+      put: async (key, body) => { objects.set(key, body); },
+      get: async (key) => objects.get(key)!,
+      delete: async (key) => { objects.delete(key); },
+    };
+    const storage = new TaskResultStorageService(db, {
+      directory,
+      signingSecret: "test-secret",
+      archiveStore,
+    });
+    const result = { content: "x".repeat(50 * 1024) };
+
+    await storage.persist("task-result-test", result);
+    const inline = db.getResult("task-result-test")!;
+    expect(inline.resultEncoding).toBe("gzip");
+    expect(Buffer.byteLength(inline.result!)).toBeLessThan(15 * 1024);
+
+    const archivedAt = new Date(Date.parse(inline.resultArchiveAt!) + 1);
+    expect(await storage.archiveExpired(archivedAt)).toBe(1);
+    expect(db.getResult("task-result-test")?.resultStatus).toBe("archived");
+    await expect(storage.readResult("task-result-test")).resolves.toEqual(
+      Buffer.from(JSON.stringify(result)),
+    );
+
+    await storage.cleanupExpired(new Date(Date.parse(inline.resultExpiresAt!) + 1));
+    expect(db.getResult("task-result-test")?.resultStatus).toBe("expired");
+    expect(objects.size).toBe(0);
     database.close();
   });
 });

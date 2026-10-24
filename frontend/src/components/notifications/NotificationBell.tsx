@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
-import NotificationPanel from './NotificationPanel';
+import NotificationPanel, { NOTIFICATION_PANEL_ID } from './NotificationPanel';
 import './NotificationCenter.css';
 
 interface NotificationBellProps {
@@ -20,8 +20,10 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ className = 
         type="button"
         className={`notification-bell-btn ${isOpen ? 'active' : ''}`}
         onClick={() => setIsOpen(prev => !prev)}
-        aria-label="Notifications"
+        aria-label={`Notifications, ${unreadCount} unread`}
         aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-controls={NOTIFICATION_PANEL_ID}
         id="btn-notifications"
         data-testid="notification-bell-btn"
       >

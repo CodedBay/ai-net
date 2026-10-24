@@ -46,6 +46,11 @@ export interface IdempotencyEntry {
   createdAt: string;
   /** ISO-8601 timestamp when the entry expires. */
   expiresAt: string;
+  /**
+   * SHA-256 hash of the original request payload.  `null` for entries
+   * persisted before request hashing existed (they replay unconditionally).
+   */
+  requestHash: string | null;
 }
 
 export interface IdempotencyStoreOptions {
@@ -60,8 +65,19 @@ export interface IdempotencyStoreOptions {
 export interface IdempotencyStore {
   /** Look up a stored entry by key.  Returns `undefined` when absent or expired. */
   get(key: string, walletAddress?: string): IdempotencyEntry | undefined;
-  /** Persist a response for a given key.  No-op if the key already exists. */
-  storeResponse(key: string, statusCode: number, body: unknown, walletAddress?: string): void;
+  /**
+   * Persist a response for a given key.  No-op if the key already exists.
+   *
+   * @param requestHash Optional SHA-256 hash of the original request payload,
+   *                    stored for later payload-mismatch detection.
+   */
+  storeResponse(
+    key: string,
+    statusCode: number,
+    body: unknown,
+    walletAddress?: string,
+    requestHash?: string | null,
+  ): void;
   /** Delete a single entry. */
   delete(key: string, walletAddress?: string): void;
   /** Remove all expired entries.  Returns the count of deleted rows. */
@@ -86,6 +102,7 @@ const DDL = `
     status_code    INTEGER NOT NULL,
     created_at     TEXT NOT NULL,
     expires_at     TEXT NOT NULL,
+    request_hash   TEXT,
     PRIMARY KEY (key, wallet_address)
   );
 
@@ -136,6 +153,11 @@ export function createIdempotencyStore(
     migrateLegacySchema();
   } else {
     database.exec(DDL);
+    // CREATE TABLE IF NOT EXISTS does not alter an existing table — add the
+    // request_hash column when upgrading a pre-006 database.
+    if (columns.length > 0 && !columnNames.has('request_hash')) {
+      database.exec('ALTER TABLE idempotency_keys ADD COLUMN request_hash TEXT');
+    }
   }
 
   const log = createLogger({ component: 'idempotency' });
@@ -143,15 +165,15 @@ export function createIdempotencyStore(
   // ── Prepared statements ──────────────────────────────────────────────────
 
   const selectStmt = database.prepare(`
-    SELECT key, status_code, response_body, created_at, expires_at
+    SELECT key, status_code, response_body, created_at, expires_at, request_hash
     FROM idempotency_keys
     WHERE key = ? AND wallet_address = ? AND expires_at > ?
   `);
 
   const upsertStmt = database.prepare(`
     INSERT OR IGNORE INTO idempotency_keys
-      (key, wallet_address, response_body, status_code, created_at, expires_at)
-    VALUES (@key, @walletAddress, @responseBody, @statusCode, @createdAt, @expiresAt)
+      (key, wallet_address, response_body, status_code, created_at, expires_at, request_hash)
+    VALUES (@key, @walletAddress, @responseBody, @statusCode, @createdAt, @expiresAt, @requestHash)
   `);
 
   const deleteStmt = database.prepare(`
@@ -172,7 +194,14 @@ export function createIdempotencyStore(
     get(key: string, walletAddress = 'anonymous'): IdempotencyEntry | undefined {
       const now = new Date().toISOString();
       const row = selectStmt.get(key, walletAddress, now) as
-        | { key: string; status_code: number; response_body: string; created_at: string; expires_at: string }
+        | {
+            key: string;
+            status_code: number;
+            response_body: string;
+            created_at: string;
+            expires_at: string;
+            request_hash: string | null;
+          }
         | undefined;
 
       if (!row) return undefined;
@@ -183,10 +212,17 @@ export function createIdempotencyStore(
         responseBody: row.response_body,
         createdAt: row.created_at,
         expiresAt: row.expires_at,
+        requestHash: row.request_hash,
       };
     },
 
-    storeResponse(key: string, statusCode: number, body: unknown, walletAddress = 'anonymous'): void {
+    storeResponse(
+      key: string,
+      statusCode: number,
+      body: unknown,
+      walletAddress = 'anonymous',
+      requestHash: string | null = null,
+    ): void {
       const now = new Date();
       const expires = new Date(now.getTime() + ttlMs);
       upsertStmt.run({
@@ -196,6 +232,7 @@ export function createIdempotencyStore(
         responseBody: JSON.stringify(body),
         createdAt: now.toISOString(),
         expiresAt: expires.toISOString(),
+        requestHash,
       });
     },
 

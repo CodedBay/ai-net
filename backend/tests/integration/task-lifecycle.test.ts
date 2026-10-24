@@ -22,6 +22,7 @@
 
 import request from "supertest";
 import Database from "better-sqlite3";
+import { StrKey } from "@stellar/stellar-base";
 
 import { createApp } from "../../src/api/app";
 import { createTaskDb } from "../../src/db/tasks";
@@ -49,10 +50,10 @@ afterAll(() => {
   delete process.env.SKIP_STELLAR_ACCOUNT_VERIFY;
 });
 
-// ── Valid Stellar-format wallet keys (G + 55 uppercase base32 chars = 56 total) ──
-const WALLET_KEY = "GLIFECYCLETESTINTEGRATIONAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".substring(0, 56);
-const OTHER_WALLET = "GOTHERWALLETTESTINTEGRATIONAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".substring(0, 56);
-const AGENT_KEY    = "GLIFECYCLEAGENTSTELLARTESTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".substring(0, 56);
+// ── Valid Stellar-format wallet keys (real StrKey-encoded ed25519 pubkeys) ───
+const WALLET_KEY = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 1));
+const OTHER_WALLET = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 2));
+const AGENT_KEY = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 3));
 
 // ── In-memory DB factories ─────────────────────────────────────────────────────
 
@@ -100,50 +101,50 @@ function makeInMemoryAgentDb(): Database.Database {
 function makeInMemoryAuthDb(): Database.Database {
   const db = new Database(":memory:");
   db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      id              TEXT    PRIMARY KEY,
-      familyId        TEXT    NOT NULL,
-      walletPublicKey TEXT    NOT NULL,
-      deviceId        TEXT    NOT NULL,
-      deviceName      TEXT,
-      ipAddress       TEXT    NOT NULL DEFAULT 'unknown',
-      userAgent       TEXT    NOT NULL DEFAULT 'unknown',
-      createdAt       TEXT    NOT NULL,
-      lastActiveAt    TEXT    NOT NULL,
-      expiresAt       TEXT    NOT NULL,
-      maxExpiresAt    TEXT    NOT NULL,
-      revoked         INTEGER NOT NULL DEFAULT 0,
-      revokedAt       TEXT,
-      revokedReason   TEXT,
-      revokedIp       TEXT,
-      revokedUa       TEXT
-    );
-    CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
-      id          TEXT    PRIMARY KEY,
-      sessionId   TEXT    NOT NULL,
-      familyId    TEXT    NOT NULL,
-      token       TEXT    NOT NULL UNIQUE,
-      parentId    TEXT,
-      consumed    INTEGER NOT NULL DEFAULT 0,
-      consumedAt  TEXT,
-      createdAt   TEXT    NOT NULL,
-      expiresAt   TEXT    NOT NULL,
-      ipAddress   TEXT    NOT NULL DEFAULT 'unknown',
-      userAgent   TEXT    NOT NULL DEFAULT 'unknown'
-    );
-    CREATE TABLE IF NOT EXISTS auth_audit_logs (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      action    TEXT    NOT NULL,
-      sessionId TEXT,
-      familyId  TEXT,
-      walletPublicKey TEXT,
-      deviceId  TEXT,
-      ipAddress TEXT,
-      userAgent TEXT,
-      metadata  TEXT,
-      timestamp TEXT    NOT NULL
-    );
-  `);
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        id              TEXT PRIMARY KEY,
+        familyId        TEXT NOT NULL,
+        walletPublicKey TEXT NOT NULL,
+        deviceId        TEXT NOT NULL,
+        deviceName      TEXT,
+        ipAddress       TEXT NOT NULL,
+        userAgent       TEXT NOT NULL,
+        createdAt       TEXT NOT NULL,
+        lastActiveAt    TEXT NOT NULL,
+        expiresAt       TEXT NOT NULL,
+        isRevoked       INTEGER NOT NULL DEFAULT 0,
+        revokedAt       TEXT,
+        revokedReason   TEXT
+      );
+      CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+        id                  TEXT PRIMARY KEY,
+        tokenHash           TEXT NOT NULL UNIQUE,
+        sessionId           TEXT NOT NULL,
+        familyId            TEXT NOT NULL,
+        walletPublicKey     TEXT NOT NULL,
+        createdAt           TEXT NOT NULL,
+        expiresAt           TEXT NOT NULL,
+        isConsumed          INTEGER NOT NULL DEFAULT 0,
+        consumedAt          TEXT,
+        isRevoked           INTEGER NOT NULL DEFAULT 0,
+        revokedAt           TEXT,
+        replacedByTokenHash TEXT
+      );
+      CREATE TABLE IF NOT EXISTS auth_audit_logs (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp       TEXT NOT NULL,
+        action          TEXT NOT NULL,
+        walletPublicKey TEXT,
+        familyId        TEXT,
+        sessionId       TEXT,
+        deviceId        TEXT,
+        ipAddress       TEXT,
+        userAgent       TEXT,
+        status          TEXT NOT NULL,
+        reason          TEXT,
+        metadata        TEXT
+      );
+      `);
   return db;
 }
 
@@ -325,14 +326,26 @@ describe("Integration: auth flow + task lifecycle", () => {
     expect(page2.body.tasks.length).toBe(2);
   });
 
-  // ── Step 6: JWT auth enforced — missing wallet header returns error ─────────
+  // ── Step 6: Missing wallet header falls back to "anonymous" (docs §9.4) ────
 
-  it("POST /api/tasks without walletpublickey header returns 400 or 401", async () => {
+  it('POST /api/tasks without walletpublickey header associates the task with "anonymous"', async () => {
     const res = await request(app.httpServer)
       .post("/api/tasks")
-      .send({ prompt: "This should fail without auth", maxBudgetXLM: 1.0 });
+      .send({ prompt: "Task created without a wallet header", maxBudgetXLM: 1.0 });
 
-    expect([400, 401, 403]).toContain(res.status);
+    expect(res.status).toBe(201);
+    expect(res.body.taskId).toMatch(/^task_/);
+
+    const list = await request(app.httpServer)
+      .get("/api/tasks")
+      .set("walletpublickey", "anonymous");
+
+    expect(list.status).toBe(200);
+    expect(
+      list.body.tasks.some(
+        (t: { prompt?: string }) => t.prompt === "Task created without a wallet header",
+      ),
+    ).toBe(true);
   });
 
   it("GET /api/tasks/:id returns 403 for a different wallet", async () => {

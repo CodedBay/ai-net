@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskResponse, NodeStatus } from '../types/api';
 import { apiClient } from '../services/api';
+import { mergePendingTasks } from '../services/optimisticTasks';
 
 // ─── Filter types ────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export function useTaskHistory(
   updateFilters: (next: Partial<TaskHistoryFilters>) => void,
   resetFilters: () => void
 ): UseTaskHistoryResult {
-  const [allTasks, setAllTasks] = useState<TaskResponse[]>([]);
+  const [serverTasks, setServerTasks] = useState<TaskResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<[string | null, string | null]>([
@@ -254,6 +255,10 @@ export function useTaskHistory(
   // Cursor state for incremental loading
   const [, setNextCursor] = useState<string | null>(null);
   const [, setHasNextPage] = useState(false);
+
+  // Show recently-submitted tasks immediately, before the API list catches up.
+  // Pending entries expire after ~60s and server records always win on dedupe.
+  const allTasks = useMemo(() => mergePendingTasks(serverTasks), [serverTasks]);
 
   const fetchTasks = useCallback(async (cursor?: string | null) => {
     setLoading(true);
@@ -265,7 +270,7 @@ export function useTaskHistory(
         '';
 
       if (!walletAddress) {
-        setAllTasks([]);
+        setServerTasks([]);
         return;
       }
 
@@ -300,7 +305,7 @@ export function useTaskHistory(
         fetchedTasks = Array.isArray(fallback) ? fallback : [];
       }
 
-      setAllTasks((prev) => (cursor ? [...prev, ...fetchedTasks] : fetchedTasks));
+      setServerTasks((prev) => (cursor ? [...prev, ...fetchedTasks] : fetchedTasks));
       setNextCursor(newCursor);
       setHasNextPage(morePages);
     } catch (err) {
@@ -312,7 +317,7 @@ export function useTaskHistory(
 
   useEffect(() => {
     // Reset and fetch from the start whenever filters change
-    setAllTasks([]);
+    setServerTasks([]);
     setNextCursor(null);
     setHasNextPage(false);
     fetchTasks(null);
@@ -326,7 +331,7 @@ export function useTaskHistory(
   }, []);
 
   const refetch = useCallback(() => {
-    setAllTasks([]);
+    setServerTasks([]);
     setNextCursor(null);
     setHasNextPage(false);
     fetchTasks(null);

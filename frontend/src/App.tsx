@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import i18n from './i18n'
@@ -7,9 +7,11 @@ import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotFoundPage } from './pages/NotFoundPage'
+import ServerErrorPage from './pages/ServerErrorPage'
+import ForbiddenPage from './pages/ForbiddenPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
-import ErrorBoundary from './components/common/ErrorBoundary'
+import ErrorBoundary, { RouteErrorBoundary } from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import RouteLoader from './components/common/RouteLoader'
@@ -17,6 +19,7 @@ import { useCommandPalette } from './hooks/useCommandPalette'
 import OnboardingModal from './components/onboarding/OnboardingModal'
 import './components/common/Toast.css'
 const PaymentsPage = lazy(() => import('./pages/PaymentsPage'))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
 const DashboardPage = lazy(() =>
   import('./pages/dashboard').then((module) => ({ default: module.DashboardPage })),
 )
@@ -60,17 +63,21 @@ const RoutedContent: React.FC = () => {
                   <Route
                     path="/dashboard"
                     element={
-                      <ProtectedRoute>
-                        <DashboardPage />
-                      </ProtectedRoute>
+                      <RouteErrorBoundary label="Dashboard">
+                        <ProtectedRoute>
+                          <DashboardPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
                     }
                   />
                   <Route
                     path="/wallet"
                     element={
-                      <ProtectedRoute>
-                        <WalletPage />
-                      </ProtectedRoute>
+                      <RouteErrorBoundary label="Wallet">
+                        <ProtectedRoute>
+                          <WalletPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
                     }
                   />
                   <Route
@@ -81,14 +88,28 @@ const RoutedContent: React.FC = () => {
                       </ProtectedRoute>
                     }
                   />
+                  <Route path="/marketplace" element={<Navigate to="/agents" replace />} />
+                  <Route path="/tasks" element={<Navigate to="/tasks/history" replace />} />
                   <Route
-                    path="/agents"
+                    path="/notifications"
                     element={
                       <ProtectedRoute>
-                        <AgentsPage />
+                        <NotificationsPage />
                       </ProtectedRoute>
                     }
                   />
+                  <Route
+                    path="/agents"
+                    element={
+                      <RouteErrorBoundary label="Agents">
+                        <ProtectedRoute>
+                          <AgentsPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
+                    }
+                  />
+                  <Route path="/forbidden" element={<ForbiddenPage />} />
+                  <Route path="/server-error" element={<ServerErrorPage />} />
                   <Route
                     path="/agents/:id"
                     element={
@@ -100,25 +121,31 @@ const RoutedContent: React.FC = () => {
                   <Route
                     path="/tasks/new"
                     element={
-                      <ProtectedRoute>
-                        <NewTaskPage />
-                      </ProtectedRoute>
+                      <RouteErrorBoundary label="New Task">
+                        <ProtectedRoute>
+                          <NewTaskPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
                     }
                   />
                   <Route
                     path="/tasks/history"
                     element={
-                      <ProtectedRoute>
-                        <TaskHistoryPage />
-                      </ProtectedRoute>
+                      <RouteErrorBoundary label="Task History">
+                        <ProtectedRoute>
+                          <TaskHistoryPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
                     }
                   />
                   <Route
                     path="/tasks/:id"
                     element={
-                      <ProtectedRoute>
-                        <TaskDetailPage />
-                      </ProtectedRoute>
+                      <RouteErrorBoundary label="Task Detail">
+                        <ProtectedRoute>
+                          <TaskDetailPage />
+                        </ProtectedRoute>
+                      </RouteErrorBoundary>
                     }
                   />
                   {import.meta.env.DEV && (

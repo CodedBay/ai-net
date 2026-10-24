@@ -94,8 +94,8 @@ page size of 20.
 
 ## Average Reduction
 
-The CI benchmark guard compares the optimized estimates against the previous
-baseline for:
+The current testnet benchmark records measured CPU instructions for these
+operations:
 
 | Operation | Previous CU | Optimized CU | Reduction |
 |----------|------------:|-------------:|----------:|

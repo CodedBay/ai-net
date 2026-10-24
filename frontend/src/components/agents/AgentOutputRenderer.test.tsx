@@ -1,6 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import React from 'react';
 import CopyButton from '../common/CopyButton';
 import CollapsibleSection from '../common/CollapsibleSection';
 import AgentOutputRenderer from './AgentOutputRenderer';

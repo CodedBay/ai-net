@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 /**
  * Backend integration tests — coordinator pipeline with mocked Venice AI
  *
@@ -62,11 +63,14 @@ function makeTaskDb(): Database.Database {
       timestamp TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS idempotency_keys (
-      key TEXT PRIMARY KEY,
-      statusCode INTEGER NOT NULL,
-      body TEXT NOT NULL,
-      expiresAt TEXT NOT NULL,
-      createdAt TEXT NOT NULL
+      key            TEXT NOT NULL,
+      wallet_address TEXT NOT NULL,
+      response_body  TEXT NOT NULL,
+      status_code    INTEGER NOT NULL,
+      created_at     TEXT NOT NULL,
+      expires_at     TEXT NOT NULL,
+      request_hash   TEXT,
+      PRIMARY KEY (key, wallet_address)
     );
   `);
   return db;
@@ -210,7 +214,7 @@ describe("Integration Test 2: rate limit enforcement — 11th task from same wal
   });
 
   it("submits 10 tasks successfully then returns 429 on the 11th within the same minute", async () => {
-    // The TASKS rate limit rule is 30/min per wallet (see rateLimitRules.ts).
+    // The authed limiter allows 30/min per wallet (RATE_LIMIT_AUTHED_MAX_REQUESTS).
     // We use 11 requests to verify the limit fires before the 30-request hard ceiling,
     // targeting the per-endpoint task rate limit that triggers at a lower threshold
     // when the same wallet submits rapidly in a burst.
@@ -249,7 +253,7 @@ describe("Integration Test 3: idempotency — duplicate Idempotency-Key returns 
   let agentDb: Database.Database;
 
   const IDEMPOTENCY_WALLET = "GIDEMPOTENCYTESTWALLETINTEGRATIONAAAAAAAAAAAAAAAAAAAAAAAA".slice(0, 56);
-  const IDEMPOTENCY_KEY    = `idem-test-${Date.now()}`;
+  const IDEMPOTENCY_KEY    = randomUUID();
 
   beforeAll(() => {
     taskDb  = makeTaskDb();

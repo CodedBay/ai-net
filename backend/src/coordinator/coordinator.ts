@@ -370,7 +370,12 @@ export class Coordinator {
    * @throws {@link RetryableAgentError} on 5xx responses, timeouts, or transient network errors.
    * @throws {@link NonRetryableAgentError} on 4xx responses.
    */
-  async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration): Promise<unknown> {
+  async dispatchNode(
+    node: DAGNode,
+    context: string,
+    agent?: AgentRegistration,
+    parentSpanId?: string,
+  ): Promise<unknown> {
     const target = agent ?? await this.cheapestAgentFor(node.type);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -383,7 +388,7 @@ export class Coordinator {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.correlationId) {
       headers['X-Correlation-ID'] = this.correlationId;
-      const currentSpan = currentSpanId();
+      const currentSpan = parentSpanId ?? currentSpanId();
       if (currentSpan) {
         headers['traceparent'] = `00-${padTraceId(this.correlationId)}-${dehyphenate(currentSpan)}-01`;
       }
@@ -393,7 +398,7 @@ export class Coordinator {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ node, context }),
+        body: JSON.stringify({ node, context, traceparent: headers['traceparent'] }),
         signal: controller.signal,
       });
 
@@ -425,6 +430,7 @@ export class Coordinator {
     node: DAGNode,
     nodeById: Map<string, DAGNode>
   ): Promise<'completed' | 'failed'> {
+    const nodeStartedAt = Date.now();
     node.status = 'running';
     updateNode(taskId, node.nodeId, { status: 'running' });
     this.bus.emit(taskId, {
@@ -435,12 +441,15 @@ export class Coordinator {
     });
 
     // Open a per-node tracing span.
+    const nodeContext = this.contextFor(node, nodeById);
+    const inputSizeBytes = Buffer.byteLength(`${node.prompt ?? ''}${nodeContext}`, 'utf8');
     const nodeSpan = this.correlationId
       ? tracingService.startSpan(this.correlationId, 'coordinator', 'node_execution', {
           taskId,
           nodeId: node.nodeId,
           agentType: node.type,
-        })
+          inputSizeBytes,
+        }, currentSpanId())
       : null;
 
     this.log.info(
@@ -449,14 +458,14 @@ export class Coordinator {
     );
 
     try {
-      const { agentId, result } = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
+      const { agentId, result } = await this.dispatchWithRetry(taskId, node, nodeContext, nodeSpan?.spanId);
 
       node.status = 'completed';
       node.result = result;
 
       // Quality score the output and feed it back into reputation. Best-effort:
       // scoring never fails the node.
-      const quality = this.scoreOutput(taskId, node, result, agentId);
+      const quality = this.scoreOutput(taskId, node, result, agentId, Date.now() - nodeStartedAt);
       if (quality) {
         node.quality = quality;
       }
@@ -493,7 +502,11 @@ export class Coordinator {
         'payment released'
       );
 
-      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'completed', { txHash });
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'completed', {
+        agentId,
+        outputSizeBytes: Buffer.byteLength(JSON.stringify(result) ?? '', 'utf8'),
+        txHash,
+      });
 
       return 'completed';
     } catch (err) {
@@ -513,7 +526,10 @@ export class Coordinator {
         'node failed'
       );
 
-      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', { error: asErrorMessage(err) });
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', {
+        inputSizeBytes,
+        error: asErrorMessage(err),
+      });
 
       return 'failed';
     }
@@ -536,7 +552,8 @@ export class Coordinator {
     taskId: string,
     node: DAGNode,
     result: unknown,
-    agentId?: string
+    agentId?: string,
+    responseTimeMs = 0,
   ): QualityScore | undefined {
     try {
       const quality = this.qualityScorer.scoreForAgentType(result, node.prompt, node.type);
@@ -559,9 +576,14 @@ export class Coordinator {
           relevance: quality.relevance.score,
           format: quality.format.score,
           needsReview: quality.needsReview,
+          responseTimeMs,
           timestamp: quality.timestamp,
         });
-        updateAgentReputation(agentId, reputationDeltaForScore(quality.score));
+        updateAgentReputation(agentId, reputationDeltaForScore(quality.score), {
+          taskId,
+          nodeId: node.nodeId,
+          timestamp: quality.timestamp,
+        });
       }
 
       this.log.info(
@@ -603,7 +625,8 @@ export class Coordinator {
   private async dispatchWithRetry(
     taskId: string,
     node: DAGNode,
-    context: string
+    context: string,
+    parentSpanId?: string,
   ): Promise<{ agentId?: string; result: unknown }> {
     if (this.dispatchOverride) {
       return { result: await this.dispatchOverride(taskId, node, context) };
@@ -615,7 +638,7 @@ export class Coordinator {
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
-        return { agentId: primary.id, result: await this.dispatchNode(node, context, primary) };
+        return { agentId: primary.id, result: await this.dispatchNode(node, context, primary, parentSpanId) };
       } catch (err) {
         lastError = err;
         if (!isRetryable(err)) throw err;
@@ -644,7 +667,7 @@ export class Coordinator {
         },
       });
       try {
-        return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback) };
+        return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback, parentSpanId) };
       } catch (err) {
         lastError = err;
       }

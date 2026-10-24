@@ -62,6 +62,12 @@ pub const BPS_DENOMINATOR: i128 = 10_000;
 /// Quorum requirement: at least 30 % of total voting power must vote.
 pub const QUORUM_BPS: i128 = 3_000;
 
+/// Default voting period in ledgers (10,080 ledgers / ~7 days).
+pub const DEFAULT_VOTING_PERIOD_LEDGERS: u32 = 10_080;
+
+/// Default quorum threshold in basis points (10% = 1,000 bps).
+pub const DEFAULT_QUORUM_THRESHOLD_BPS: i128 = 1_000;
+
 /// Majority requirement: strictly more than 50 % of decisive votes.
 pub const MAJORITY_BPS: i128 = 5_000;
 
@@ -114,8 +120,10 @@ pub enum ProposalStatus {
     Active = 0,
     /// Voting closed, quorum + majority met — the proposal passed.
     Executed = 1,
-    /// Voting closed, quorum or majority not met — the proposal failed.
+    /// Voting closed, majority not met — the proposal failed.
     Failed = 2,
+    /// Voting closed, quorum not met.
+    QuorumFailed = 3,
 }
 
 /// The three vote options.
@@ -156,6 +164,10 @@ pub struct Proposal {
     pub abstain_power: i128,
     /// Total electorate voting power at creation time (quorum denominator).
     pub total_power_snapshot: i128,
+    /// Ledger sequence when voting starts (Issue #408).
+    pub voting_start_ledger: u32,
+    /// Ledger sequence when voting ends (Issue #408).
+    pub voting_end_ledger: u32,
 }
 
 /// A single agent's vote on a proposal.
@@ -186,6 +198,12 @@ pub enum DataKey {
     Proposal(u64),
     /// [`VoteRecord`] for a given (proposal, voter) pair.
     Vote(u64, Address),
+    /// Platform config address (Issue #408).
+    PlatformConfig,
+    /// Configured voting period in ledgers.
+    VotingPeriodLedgers,
+    /// Configured quorum threshold in basis points.
+    QuorumThresholdBps,
 }
 
 // ─── Event payloads ──────────────────────────────────────────────────────────
@@ -219,6 +237,33 @@ pub struct ProposalExecutedEvent {
     pub for_power: i128,
     pub against_power: i128,
     pub abstain_power: i128,
+}
+
+/// Emitted when voting starts on a proposal (Issue #408).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VotingStartedEvent {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub voting_start_ledger: u32,
+    pub voting_end_ledger: u32,
+}
+
+/// Emitted when proposal quorum is reached (Issue #408).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QuorumReachedEvent {
+    pub proposal_id: u64,
+    pub total_voted: i128,
+}
+
+/// Emitted when proposal quorum fails (Issue #408).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QuorumFailedEvent {
+    pub proposal_id: u64,
+    pub total_voted: i128,
+    pub quorum_needed: i128,
 }
 
 /// Emitted when `execute_proposal` finalises a proposal that failed.

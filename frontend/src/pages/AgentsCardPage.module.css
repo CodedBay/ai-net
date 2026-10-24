@@ -11,25 +11,25 @@
   margin-top: 16px;
 }
 
-/* Mobile: single column below 640px */
-@media (max-width: 639px) {
+/* Mobile: single column below 768px */
+@media (max-width: 767px) {
   .cardGrid {
     grid-template-columns: 1fr;
   }
 }
 
-/* Tablet: 2 columns from 640px–1023px (covers 768x1024 and 1024x1366 viewports) */
-@media (min-width: 640px) and (max-width: 1023px) {
+/* Tablet: 2 columns through 1024px. */
+@media (min-width: 768px) and (max-width: 1024px) {
   .cardGrid {
     grid-template-columns: repeat(2, 1fr);
     gap: 16px;
   }
 }
 
-/* Desktop: auto-fill with min 280px per card (3+ columns) */
-@media (min-width: 1024px) {
+/* Desktop: three columns alongside the persistent filter sidebar. */
+@media (min-width: 1025px) {
   .cardGrid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

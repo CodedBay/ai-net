@@ -10,8 +10,8 @@
 /// - Task not found returns error
 /// - Expired task returns Expired error
 #[cfg(test)]
-mod integration_tests {
-    use super::*;
+mod tests {
+    use crate::{Error, TaskStatus, TaskStoreContract, TaskStoreContractClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         Address, Bytes, BytesN, Env, Vec,
@@ -93,11 +93,13 @@ mod integration_tests {
         store(&f);
 
         // Pending → Running
-        f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
+        f.client
+            .update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
         assert_eq!(f.client.get_task_status(&f.task_id), TaskStatus::Running);
 
         // Running → Completed
-        f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Completed);
+        f.client
+            .update_task_status(&f.task_id, &f.agent, &TaskStatus::Completed);
         assert_eq!(f.client.get_task_status(&f.task_id), TaskStatus::Completed);
     }
 
@@ -106,7 +108,8 @@ mod integration_tests {
         let f = fixture();
         store(&f);
 
-        f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Failed);
+        f.client
+            .update_task_status(&f.task_id, &f.agent, &TaskStatus::Failed);
         assert_eq!(f.client.get_task_status(&f.task_id), TaskStatus::Failed);
     }
 
@@ -115,8 +118,10 @@ mod integration_tests {
         let f = fixture();
         store(&f);
 
-        f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
-        f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Failed);
+        f.client
+            .update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
+        f.client
+            .update_task_status(&f.task_id, &f.agent, &TaskStatus::Failed);
         assert_eq!(f.client.get_task_status(&f.task_id), TaskStatus::Failed);
     }
 
@@ -126,11 +131,9 @@ mod integration_tests {
         store(&f);
 
         // Cannot skip Running → go directly Pending → Completed.
-        let result = f.client.try_update_task_status(
-            &f.task_id,
-            &f.agent,
-            &TaskStatus::Completed,
-        );
+        let result = f
+            .client
+            .try_update_task_status(&f.task_id, &f.agent, &TaskStatus::Completed);
         assert_eq!(result, Err(Ok(Error::InvalidStatusTransition)));
     }
 
@@ -140,11 +143,9 @@ mod integration_tests {
         store(&f);
 
         let stranger = Address::generate(&f.env);
-        let result = f.client.try_update_task_status(
-            &f.task_id,
-            &stranger,
-            &TaskStatus::Running,
-        );
+        let result = f
+            .client
+            .try_update_task_status(&f.task_id, &stranger, &TaskStatus::Running);
         assert_eq!(result, Err(Ok(Error::NotAssignedAgent)));
     }
 

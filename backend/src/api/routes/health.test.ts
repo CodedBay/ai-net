@@ -322,35 +322,35 @@ describe("GET /health/dashboard", () => {
 
   // ── Admin API key protection ───────────────────────────────────────────────
 
-  it("returns 401 when no admin API key is supplied", async () => {
+  it("returns 403 when no admin API key is supplied", async () => {
     const res = await request(buildApp()).get("/health/dashboard");
-    expect(res.status).toBe(401);
-    expect(res.body.error).toBe("Unauthorized");
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Forbidden");
     expect(dashboardSpy).not.toHaveBeenCalled();
   });
 
-  it("returns 401 when the admin API key is wrong", async () => {
+  it("returns 403 when the admin API key is wrong", async () => {
     const res = await request(buildApp())
       .get("/health/dashboard")
       .set("X-Admin-API-Key", "wrong-key");
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
     expect(dashboardSpy).not.toHaveBeenCalled();
   });
 
-  it("returns 401 when the key is a prefix of the configured key", async () => {
+  it("returns 403 when the key is a prefix of the configured key", async () => {
     const res = await request(buildApp())
       .get("/health/dashboard")
       .set("X-Admin-API-Key", ADMIN_KEY.slice(0, 5));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(403);
   });
 
-  it("returns 503 when ADMIN_API_KEY is not configured", async () => {
+  it("returns 403 when ADMIN_API_KEY is not configured", async () => {
     delete process.env.ADMIN_API_KEY;
     const res = await request(buildApp())
       .get("/health/dashboard")
       .set("X-Admin-API-Key", ADMIN_KEY);
-    expect(res.status).toBe(503);
-    expect(res.body.error).toBe("Admin API not configured");
+    expect(res.status).toBe(403);
+    expect(res.body.message).toContain("Admin API not configured");
     expect(dashboardSpy).not.toHaveBeenCalled();
   });
 

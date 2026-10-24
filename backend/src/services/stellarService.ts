@@ -10,6 +10,8 @@ import {
 } from "@stellar/stellar-sdk";
 import { AppError } from "../errors";
 import { getConfig } from "../config";
+import { SequenceNumberManager } from "../payment/sequenceManager";
+import { metricsService } from "./metrics";
 
 export interface TransactionResult {
   hash: string;
@@ -71,6 +73,7 @@ export class StellarService {
   private readonly networkPassphrase: string;
   private readonly maxSequenceRetries: number;
   private readonly pollIntervalMs: number;
+  private readonly sequenceManager: SequenceNumberManager;
   private readonly plans = new Map<string, TransactionPlan>();
 
   constructor(options: {
@@ -78,12 +81,14 @@ export class StellarService {
     networkPassphrase?: string;
     maxSequenceRetries?: number;
     pollIntervalMs?: number;
+    sequenceManager?: SequenceNumberManager;
   } = {}) {
     const config = getConfig();
     this.server = options.server ?? new Horizon.Server(config.STELLAR_HORIZON_URL) as unknown as StellarHorizonClient;
     this.networkPassphrase = options.networkPassphrase ?? config.STELLAR_NETWORK_PASSPHRASE;
     this.maxSequenceRetries = Math.min(3, Math.max(0, options.maxSequenceRetries ?? 3));
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
+    this.sequenceManager = options.sequenceManager ?? new SequenceNumberManager();
   }
 
   async buildPaymentTransaction(from: Keypair, to: string, amount: number, memo?: string): Promise<Transaction> {
@@ -122,33 +127,40 @@ export class StellarService {
       throw mapStellarError(error);
     }
 
-    for (let retry = 0; ; retry += 1) {
-      try {
-        const response = await this.withHorizonRetry(() => this.server.submitTransaction(transaction), true);
-        if (!response.hash) {
-          throw new StellarServiceError("Stellar Horizon accepted the request without returning a transaction hash", 502, "STELLAR_INVALID_RESPONSE");
-        }
-        this.plans.delete(xdr);
-        return { hash: response.hash, success: true };
-      } catch (error) {
-        if (isSequenceConflict(error) && plan && retry < this.maxSequenceRetries) {
-          try {
-            transaction = await this.buildFromPlan(plan);
-            continue;
-          } catch (rebuildError) {
-            throw mapStellarError(rebuildError);
+    const submit = async (): Promise<{ hash: string; success: boolean }> => {
+      for (let retry = 0; ; retry += 1) {
+        try {
+          const response = await this.withHorizonRetry(() => this.server.submitTransaction(transaction), true);
+          if (!response.hash) {
+            throw new StellarServiceError("Stellar Horizon accepted the request without returning a transaction hash", 502, "STELLAR_INVALID_RESPONSE");
           }
-        }
-        if (isSequenceConflict(error)) {
-          if (!plan) {
-            throw new StellarServiceError("Sequence conflict; rebuild the transaction with StellarService before retrying", 409, "STELLAR_SEQUENCE_CONFLICT");
+          this.plans.delete(xdr);
+          return { hash: response.hash, success: true };
+        } catch (error) {
+          if (isSequenceConflict(error)) metricsService.recordStellarSequenceConflict();
+          if (isSequenceConflict(error) && plan && retry < this.maxSequenceRetries) {
+            try {
+              transaction = await this.buildFromPlan(plan);
+              continue;
+            } catch (rebuildError) {
+              throw mapStellarError(rebuildError);
+            }
           }
-          throw new StellarServiceError("Stellar transaction sequence conflict persisted after retries", 409, "STELLAR_SEQUENCE_CONFLICT");
+          if (isSequenceConflict(error)) {
+            if (!plan) {
+              throw new StellarServiceError("Sequence conflict; rebuild the transaction with StellarService before retrying", 409, "STELLAR_SEQUENCE_CONFLICT");
+            }
+            throw new StellarServiceError("Stellar transaction sequence conflict persisted after retries", 409, "STELLAR_SEQUENCE_CONFLICT");
+          }
+          if (error instanceof StellarServiceError) throw error;
+          throw mapStellarError(error);
         }
-        if (error instanceof StellarServiceError) throw error;
-        throw mapStellarError(error);
       }
-    }
+    };
+
+    return plan
+      ? this.sequenceManager.withAccount(plan.from.publicKey(), submit)
+      : submit();
   }
 
   async getAccountBalance(publicKey: string): Promise<number> {

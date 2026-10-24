@@ -69,6 +69,19 @@ export const pop: Variants = {
   exit: { opacity: 0, scale: 0.95, transition: { duration: 0.15 } },
 }
 
+/** Spring feedback for a selectable card press. */
+export const agentCardPress = {
+  scale: 0.98,
+  transition: { type: 'spring' as const, stiffness: 500, damping: 24, duration: 0.2 },
+}
+
+/** Comparison badge entrance with a short spring pop. */
+export const selectionBadge: Variants = {
+  hidden: { opacity: 0, scale: 0.65 },
+  visible: { opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 420, damping: 22, duration: 0.3 } },
+  exit: { opacity: 0, scale: 0.65, transition: { duration: 0.12 } },
+}
+
 // ─── Slide ────────────────────────────────────────────────────────────────────
 
 /** Slide in from the right (e.g. drawers, side panels). */

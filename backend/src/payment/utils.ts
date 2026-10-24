@@ -6,8 +6,11 @@ export class PaymentAlreadyReleasedError extends Error {
 }
 
 export class HorizonUnavailableError extends Error {
+  readonly code = "STELLAR_HORIZON_UNAVAILABLE";
+  readonly statusCode = 503;
+
   constructor(attempts: number) {
-    super(`Horizon unavailable after ${attempts} attempts`);
+    super(`Stellar Horizon unavailable after ${attempts} attempts`);
     this.name = "HorizonUnavailableError";
   }
 }

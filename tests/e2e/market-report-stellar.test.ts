@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import type { AddressInfo } from 'net';
 import { Keypair } from '@stellar/stellar-sdk';
 import { createApp } from '../../backend/src/api/app';
@@ -206,7 +206,7 @@ describeTestnet('five-agent market report pipeline on Stellar testnet', () => {
         'Content-Type': 'application/json',
         'API-Version': '1.0',
         walletpublickey: walletPublicKey,
-        'Idempotency-Key': `market-report-${Date.now()}`,
+        'Idempotency-Key': randomUUID(),
       },
       body: JSON.stringify({
         prompt: 'Generate a market entry report including risk, software implementation, and design recommendations for Southeast Asia solar.',

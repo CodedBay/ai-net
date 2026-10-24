@@ -9,6 +9,7 @@ import path from "path";
 import { createLogger } from "../utils/logger";
 import { migrateToLatest } from "./migrator";
 import { createPool, type SqlitePool } from "./pool";
+import { poolSettings } from "./poolConfig";
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "events");
 
@@ -54,9 +55,7 @@ export function getEventsPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "events.db");
     _pool = createPool({
       filePath,
-      min: 1,
-      max: 4,
-      acquireTimeoutMs: 5_000,
+      ...poolSettings(),
       onCreate: (db) => {
         (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
           "error",
@@ -70,6 +69,10 @@ export function getEventsPool(dbPath?: string): SqlitePool {
     logger.info({ dbPath: filePath }, "events database opened");
   }
   return _pool;
+}
+
+export function currentEventsPool(): SqlitePool | null {
+  return _pool && !_pool.closed ? _pool : null;
 }
 
 /** Synchronous writer connection — for simple inserts from the indexer. */

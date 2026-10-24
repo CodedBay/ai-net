@@ -25,12 +25,12 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { createTaskDb, getTaskDb } from '../../../db/tasks';
-import { getGlobalJobQueue, type JobQueue } from '../../../queue';
-import { createLogger } from '../../../utils/logger';
-import { getConfig } from '../../../config';
-import { PaymentService } from '../../../payment/payment';
-import { getDb } from '../../../db/index';
+import { createTaskDb, getTaskDb } from '../../db/tasks';
+import { getGlobalJobQueue, type JobQueue } from '../../queue';
+import { createLogger } from '../../utils/logger';
+import { getConfig } from '../../config';
+import { PaymentService } from '../../payment/payment';
+import { getDb } from '../../db/index';
 import { Keypair } from '@stellar/stellar-sdk';
 
 const log = createLogger({ component: 'cancel-task' });
@@ -69,7 +69,7 @@ export function createCancelTaskRouter(options: CancelTaskRouterOptions = {}): R
       }
 
       // ── 2. Authorisation: task owner or admin ─────────────────────────────
-      const requesterKey = req.headers['walletpublickey'] as string | undefined;
+      const requesterKey = req.user?.sub;
       const adminKey = req.headers['x-admin-key'] as string | undefined;
       const configAdminKey = getConfig().ADMIN_API_KEY;
 

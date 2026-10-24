@@ -1,4 +1,4 @@
-import { SequenceNumberManager } from "./sequenceManager";
+import { SequenceNumberManager, SEQUENCE_LOCK_TTL_MS, type RedisSequenceLockClient } from "./sequenceManager";
 
 describe("SequenceNumberManager", () => {
   describe("withAccount – single account serialization", () => {
@@ -108,6 +108,27 @@ describe("SequenceNumberManager", () => {
       // Next call on the same account must complete normally.
       const result = await mgr.withAccount("GSTUCK", async () => "ok");
       expect(result).toBe("ok");
+    });
+  });
+
+  describe("withAccount – Redis coordination", () => {
+    it("uses a 10-second Redis lease and releases only its own lock token", async () => {
+      const redis: RedisSequenceLockClient = {
+        set: jest.fn().mockResolvedValue("OK"),
+        eval: jest.fn().mockResolvedValue(1),
+      };
+      const manager = new SequenceNumberManager(redis);
+
+      await expect(manager.withAccount("GREDIS", async () => "submitted")).resolves.toBe("submitted");
+
+      expect(redis.set).toHaveBeenCalledWith(
+        "stellar:sequence:GREDIS",
+        expect.any(String),
+        "PX",
+        SEQUENCE_LOCK_TTL_MS,
+        "NX",
+      );
+      expect(redis.eval).toHaveBeenCalledWith(expect.stringContaining("redis.call(\"get\""), 1, "stellar:sequence:GREDIS", expect.any(String));
     });
   });
 

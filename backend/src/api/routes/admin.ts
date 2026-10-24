@@ -93,6 +93,7 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
   const jobQueue = options.queue ?? getGlobalJobQueue();
   const reconciliationService = getReconciliationService(options.reconciliation);
 
+  router.use(adminAuthMiddleware);
   router.use(auditAdminRequests);
 
   router.get("/read-only", (_req: Request, res: Response) => {
@@ -206,7 +207,7 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
    *       `Authorization: Bearer`.
    *     tags: [Admin]
    *     security:
-   *       - adminApiKey: []
+  *       - AdminApiKey: []
    *     parameters:
    *       - in: path
    *         name: id
@@ -233,7 +234,7 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
    *       503:
    *         description: ADMIN_API_KEY is not configured
    */
-  router.get("/traces/:id", adminAuthMiddleware, (req: Request, res: Response) => {
+  router.get("/traces/:id", (req: Request, res: Response) => {
     const id = req.params.id;
 
     // Resolve requestId → correlationId when the id is not already a trace.

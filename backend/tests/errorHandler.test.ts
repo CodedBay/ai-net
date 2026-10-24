@@ -64,9 +64,7 @@ describe("errorHandler — production mode", () => {
     const body = res.json.mock.calls[0][0];
     // error is now a structured object — message must not leak internals
     expect(body.error.message).not.toContain("SQLITE_CONSTRAINT");
-    expect(body.error.message).toBe(
-      "An unexpected error occurred. Please try again later.",
-    );
+    expect(body.error.message).toBe("Internal server error");
   });
 
   it("does not include a stack trace", () => {
@@ -82,7 +80,7 @@ describe("errorHandler — production mode", () => {
     expect(body.stack).toBeUndefined();
   });
 
-  it("always uses INTERNAL_SERVER_ERROR code in production (no leaking err.code)", () => {
+  it("always uses INTERNAL_ERROR code in production (no leaking err.code)", () => {
     const errorHandler = freshErrorHandler("production");
     const err: any = new Error("db is down");
     err.code = "DB_UNAVAILABLE";
@@ -91,10 +89,10 @@ describe("errorHandler — production mode", () => {
     errorHandler(err, makeReq(), res as unknown as Response, jest.fn() as NextFunction);
 
     const body = res.json.mock.calls[0][0];
-    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
-  it("falls back to INTERNAL_SERVER_ERROR when err.code is absent", () => {
+  it("falls back to INTERNAL_ERROR when err.code is absent", () => {
     const errorHandler = freshErrorHandler("production");
     const err = new Error("some unknown failure");
     const res = makeRes();
@@ -102,7 +100,7 @@ describe("errorHandler — production mode", () => {
     errorHandler(err, makeReq(), res as unknown as Response, jest.fn() as NextFunction);
 
     const body = res.json.mock.calls[0][0];
-    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
   it("respects err.statusCode", () => {
@@ -221,11 +219,11 @@ describe("errorHandler — AppError instances", () => {
     expect(res.status).toHaveBeenCalledWith(404);
     const body = res.json.mock.calls[0][0];
     expect(body.error.code).toBe("NOT_FOUND");
-    expect(body.error.message).toBe("Task 'task-123' not found");
+    expect(body.error.message).toBe("Task not found: task-123");
     expect(body.error.correlationId).toBe(err.correlationId);
   });
 
-  it("does not include details in production for AppError", () => {
+  it("includes details in production for AppError (client-facing validation issues)", () => {
     jest.resetModules();
     setTestConfigEnv("production");
     const { errorHandler } = require("../src/api/middleware/errorHandler");
@@ -236,7 +234,7 @@ describe("errorHandler — AppError instances", () => {
     errorHandler(err, makeReq(), res as unknown as Response, jest.fn() as NextFunction);
 
     const body = res.json.mock.calls[0][0];
-    expect(body.error.details).toBeUndefined();
+    expect(body.error.details).toEqual({ field: "prompt" });
   });
 
   it("includes details in development for AppError", () => {

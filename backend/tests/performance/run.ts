@@ -1,9 +1,14 @@
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { StrKey } from '@stellar/stellar-sdk';
+
+// Valid StrKey — /api/tasks rejects malformed wallet public keys.
+const PERF_WALLET = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { performance } from 'perf_hooks';
 import { request as httpRequest } from 'http';
 import type { AddressInfo } from 'net';
+import { taskFactory } from '../factories';
 
 type Percentile = 'p50' | 'p95' | 'p99';
 type EndpointName = 'list' | 'submit' | 'stream';
@@ -61,7 +66,7 @@ function requestJson(
       path,
       method,
       headers: {
-        walletpublickey: 'GPERFORMANCEWALLET',
+        walletpublickey: PERF_WALLET,
         ...(payload
           ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
           : {}),
@@ -110,6 +115,10 @@ async function main(): Promise<void> {
 
   process.env.NODE_ENV = 'test';
   process.env.DAILY_TASK_LIMIT_PER_WALLET = '0';
+  // Latency benchmarking issues many requests — lift the API rate limiters.
+  process.env.RATE_LIMIT_MAX_REQUESTS = '100000';
+  process.env.RATE_LIMIT_AUTHED_MAX_REQUESTS = '100000';
+  process.env.RATE_LIMIT_PUBLIC_MAX_REQUESTS = '100000';
   const originalCwd = process.cwd();
   const workingDirectory = mkdtempSync(join(tmpdir(), 'ai-net-performance-'));
   process.chdir(workingDirectory);
@@ -135,17 +144,16 @@ async function main(): Promise<void> {
 
     const eventStore = eventStoreModule.createEventStore();
     const streamTaskId = 'task_performance_stream';
-    const walletPublicKey = 'GPERFORMANCEWALLET';
+    const walletPublicKey = PERF_WALLET;
     const now = new Date().toISOString();
-    taskStoreModule.createTask({
+    taskStoreModule.createTask(taskFactory.create({
       id: streamTaskId,
       prompt: 'Performance stream fixture',
       walletPublicKey,
       status: 'queued',
-      dag: [],
       createdAt: now,
       updatedAt: now,
-    });
+    }));
     eventStore.append({
       ...eventTypesModule.makeTaskCompleted(streamTaskId, now),
       taskSeq: 0,
@@ -177,7 +185,7 @@ async function main(): Promise<void> {
         submitIndex += 1;
         return requestJson(port, '/api/tasks', 'POST', {
           prompt: `Performance task ${submitIndex}`,
-          walletPublicKey: `GPERFORMANCE${submitIndex}`,
+          walletPublicKey,
         });
       }),
       stream: await benchmark(() => new Promise<void>((resolve, reject) => {

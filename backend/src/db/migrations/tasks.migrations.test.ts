@@ -3,7 +3,7 @@
  *
  * Verifies that every migration in the tasks migrations directory applies the
  * correct schema changes (tables, columns, indexes) and rolls back cleanly.
- * Also covers the multi-step chain v1→v2→v3→v4 forward and v4→v3→v2→v1
+ * Also covers the multi-step chain v1→…→v6 forward and v6→…→v1
  * in reverse.
  *
  * Real SQLite is used (jest.requireActual) so that actual DDL executes rather
@@ -124,7 +124,7 @@ describe("tasks migrations — 001_create_tasks_table", () => {
 
   it("down() removes the tasks table", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 4); // roll back all 4 migrations
+    rollback(db, MIGRATIONS_DIR, 6); // roll back all 6 migrations
 
     expect(tables(db)).not.toContain("tasks");
     expect(appliedVersions(db)).toHaveLength(0);
@@ -142,7 +142,7 @@ describe("tasks migrations — 002_create_task_events_table", () => {
     db = openDb();
     migrateToLatest(db, MIGRATIONS_DIR);
     // Roll back to just v1 so we can test v2 in isolation.
-    rollback(db, MIGRATIONS_DIR, 3);
+    rollback(db, MIGRATIONS_DIR, 5);
   });
 
   afterEach(() => {
@@ -172,8 +172,8 @@ describe("tasks migrations — 002_create_task_events_table", () => {
   });
 
   it("down() drops the task_events table and its index", () => {
-    migrateToLatest(db, MIGRATIONS_DIR); // bring back to v4
-    rollback(db, MIGRATIONS_DIR, 3);    // roll back v4, v3, v2
+    migrateToLatest(db, MIGRATIONS_DIR); // bring back to v6
+    rollback(db, MIGRATIONS_DIR, 5);    // roll back v6, v5, v4, v3, v2
 
     expect(appliedVersions(db)).toEqual([1]);
     expect(tables(db)).not.toContain("task_events");
@@ -182,7 +182,7 @@ describe("tasks migrations — 002_create_task_events_table", () => {
 
   it("down() leaves tasks table untouched", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 3);
+    rollback(db, MIGRATIONS_DIR, 5);
 
     expect(tables(db)).toContain("tasks");
   });
@@ -199,7 +199,7 @@ describe("tasks migrations — 003_create_quality_scores_table", () => {
     db = openDb();
     migrateToLatest(db, MIGRATIONS_DIR);
     // Roll back to v2 so we can test v3 in isolation.
-    rollback(db, MIGRATIONS_DIR, 2);
+    rollback(db, MIGRATIONS_DIR, 4);
   });
 
   afterEach(() => {
@@ -241,7 +241,7 @@ describe("tasks migrations — 003_create_quality_scores_table", () => {
 
   it("down() drops quality_scores table and its index", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 2);
+    rollback(db, MIGRATIONS_DIR, 4);
 
     expect(appliedVersions(db)).toEqual([1, 2]);
     expect(tables(db)).not.toContain("quality_scores");
@@ -260,7 +260,7 @@ describe("tasks migrations — 004_add_created_at_index", () => {
     db = openDb();
     migrateToLatest(db, MIGRATIONS_DIR);
     // Roll back to v3 so we can test v4 in isolation.
-    rollback(db, MIGRATIONS_DIR, 1);
+    rollback(db, MIGRATIONS_DIR, 3);
   });
 
   afterEach(() => {
@@ -276,12 +276,12 @@ describe("tasks migrations — 004_add_created_at_index", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(indexes(db)).toContain("idx_tasks_created_at");
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4]);
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it("down() removes idx_tasks_created_at index and leaves tasks table intact", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 1);
+    rollback(db, MIGRATIONS_DIR, 3);
 
     expect(indexes(db)).not.toContain("idx_tasks_created_at");
     expect(tables(db)).toContain("tasks");
@@ -292,7 +292,7 @@ describe("tasks migrations — 004_add_created_at_index", () => {
     const second = migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(second.applied).toEqual([]);
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4]);
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 });
 
@@ -311,7 +311,7 @@ describe("tasks migrations — full forward and reverse chain", () => {
     db.close();
   });
 
-  it("applies all 4 migrations in order and records them in the ledger", () => {
+  it("applies all 6 migrations in order and records them in the ledger", () => {
     const { applied } = migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(applied).toEqual([
@@ -319,43 +319,48 @@ describe("tasks migrations — full forward and reverse chain", () => {
       "2_create_task_events_table",
       "3_create_quality_scores_table",
       "4_add_created_at_index",
+      "5_add_task_results",
+      "6_create_idempotency_keys",
     ]);
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4]);
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it("v4 → v3 rollback removes only the created-at index", () => {
+  it("single-step rollback removes only the latest migration (v6)", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
     const { rolledBack } = rollback(db, MIGRATIONS_DIR, 1);
 
-    expect(rolledBack).toEqual(["4_add_created_at_index"]);
-    expect(appliedVersions(db)).toEqual([1, 2, 3]);
-    expect(indexes(db)).not.toContain("idx_tasks_created_at");
+    expect(rolledBack).toEqual(["6_create_idempotency_keys"]);
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5]);
+    expect(tables(db)).not.toContain("idempotency_keys");
     expect(tables(db)).toContain("quality_scores");
+    expect(indexes(db)).toContain("idx_tasks_created_at");
   });
 
-  it("v3 → v2 rollback removes quality_scores", () => {
+  it("rollback to v2 removes quality_scores but keeps task_events", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 2); // removes v4 + v3
+    rollback(db, MIGRATIONS_DIR, 4); // removes v6 + v5 + v4 + v3
 
     expect(appliedVersions(db)).toEqual([1, 2]);
     expect(tables(db)).not.toContain("quality_scores");
     expect(tables(db)).toContain("task_events");
   });
 
-  it("v2 → v1 rollback removes task_events", () => {
+  it("rollback to v1 removes task_events but keeps tasks", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 3); // removes v4 + v3 + v2
+    rollback(db, MIGRATIONS_DIR, 5); // removes v6 + v5 + v4 + v3 + v2
 
     expect(appliedVersions(db)).toEqual([1]);
     expect(tables(db)).not.toContain("task_events");
     expect(tables(db)).toContain("tasks");
   });
 
-  it("full rollback (all 4 steps) leaves an empty schema", () => {
+  it("full rollback (all 6 steps) leaves an empty schema", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    const { rolledBack } = rollback(db, MIGRATIONS_DIR, 4);
+    const { rolledBack } = rollback(db, MIGRATIONS_DIR, 6);
 
     expect(rolledBack).toEqual([
+      "6_create_idempotency_keys",
+      "5_add_task_results",
       "4_add_created_at_index",
       "3_create_quality_scores_table",
       "2_create_task_events_table",
@@ -368,29 +373,88 @@ describe("tasks migrations — full forward and reverse chain", () => {
 
   it("migrating forward again after a full rollback restores the complete schema", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 4);
+    rollback(db, MIGRATIONS_DIR, 6);
 
     const { applied } = migrateToLatest(db, MIGRATIONS_DIR);
 
-    expect(applied).toHaveLength(4);
+    expect(applied).toHaveLength(6);
     expect(tables(db)).toEqual(
-      expect.arrayContaining(["tasks", "task_events", "quality_scores"]),
+      expect.arrayContaining(["tasks", "task_events", "quality_scores", "idempotency_keys"]),
     );
     expect(indexes(db)).toEqual(
-      expect.arrayContaining(["idx_task_events_taskId", "idx_quality_scores_agentId", "idx_tasks_created_at"]),
+      expect.arrayContaining(["idx_task_events_taskId", "idx_quality_scores_agentId", "idx_tasks_created_at", "idx_idempotency_expires_at"]),
     );
   });
 
-  it("partial rollback (v4→v2) then re-migrate restores v3 and v4", () => {
+  it("partial rollback (v6→v4) then re-migrate restores v5 and v6", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR, 2); // back to v2
+    rollback(db, MIGRATIONS_DIR, 2); // back to v4
 
     const { applied } = migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(applied).toEqual([
-      "3_create_quality_scores_table",
-      "4_add_created_at_index",
+      "5_add_task_results",
+      "6_create_idempotency_keys",
     ]);
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4]);
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 006_create_idempotency_keys
+// ---------------------------------------------------------------------------
+
+describe("tasks migrations — 006_create_idempotency_keys", () => {
+  let db: InstanceType<typeof RealDatabase>;
+
+  beforeEach(() => {
+    db = openDb();
+    // Roll back to v5 so we can test v6 in isolation.
+    migrateToLatest(db, MIGRATIONS_DIR);
+    rollback(db, MIGRATIONS_DIR, 1);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("starting state: idempotency_keys does not exist at v5", () => {
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5]);
+    expect(tables(db)).not.toContain("idempotency_keys");
+  });
+
+  it("up() creates idempotency_keys with all expected columns", () => {
+    migrateToLatest(db, MIGRATIONS_DIR);
+
+    expect(tables(db)).toContain("idempotency_keys");
+    const cols = columns(db, "idempotency_keys");
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "key",
+        "wallet_address",
+        "response_body",
+        "status_code",
+        "created_at",
+        "expires_at",
+        "request_hash",
+      ]),
+    );
+  });
+
+  it("up() creates idx_idempotency_expires_at index", () => {
+    migrateToLatest(db, MIGRATIONS_DIR);
+
+    expect(indexes(db)).toContain("idx_idempotency_expires_at");
+  });
+
+  it("down() drops the idempotency_keys table", () => {
+    migrateToLatest(db, MIGRATIONS_DIR);
+    expect(tables(db)).toContain("idempotency_keys");
+
+    rollback(db, MIGRATIONS_DIR, 1);
+
+    expect(tables(db)).not.toContain("idempotency_keys");
+    expect(indexes(db)).not.toContain("idx_idempotency_expires_at");
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5]);
   });
 });

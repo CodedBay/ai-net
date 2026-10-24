@@ -11,6 +11,7 @@ import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
 import { idempotencyMiddleware } from "../../middleware/idempotency";
 import { currentTraceId } from "../../../services/traceContext";
+import { computeTaskEstimate, parseEstimateAgentsQuery } from "../../../services/taskEstimate";
 import { getConfig } from "../../../config";
 import { TaskListSchema } from "../../schemas/task.schema";
 
@@ -51,10 +52,7 @@ export function createV2TasksRouter(
   // POST /api/tasks — v2 format with enhanced response, idempotent
   tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
-    const walletPublicKey: string =
-      (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
-      (req.headers["walletpublickey"] as string | undefined) ??
-      "anonymous";
+    const walletPublicKey = req.user!.sub;
 
     const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
     if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
@@ -213,6 +211,32 @@ export function createV2TasksRouter(
     });
   });
 
+  // GET /api/tasks/estimate — must be registered before /:id
+  tasksRouter.get("/estimate", (req: Request, res: Response): void => {
+    const now = new Date().toISOString();
+    const parsed = parseEstimateAgentsQuery(req.query as Record<string, unknown>);
+    if (!parsed.ok) {
+      res.status(400).json({
+        error: {
+          message: parsed.message,
+          code: parsed.code,
+        },
+        _meta: { version: "2.0", timestamp: now },
+      });
+      return;
+    }
+
+    res.json({
+      data: computeTaskEstimate(parsed.agents),
+      _meta: {
+        version: "2.0",
+        timestamp: now,
+        requestId: res.locals.requestId || null,
+        apiVersion: res.locals.apiVersion || "2.0",
+      },
+    });
+  });
+
   // GET /api/tasks/:id — v2 format with enhanced response
   tasksRouter.get("/:id", (req: Request, res: Response): void => {
     const db = createTaskDb(getTaskDb());
@@ -227,7 +251,7 @@ export function createV2TasksRouter(
       });
       return;
     }
-    const requesterKey = req.headers["walletpublickey"] as string;
+    const requesterKey = req.user?.sub;
     if (!requesterKey || requesterKey !== task.walletPublicKey) {
       res.status(403).json({
         error: "Access denied",

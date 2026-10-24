@@ -11,8 +11,10 @@ import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { SkeletonTable } from '../common/Skeleton'
 import { EmptyState } from '../common/EmptyState'
 import { PaymentsEmptyIllustration } from '../common/illustrations'
+import { useSelectTypeahead } from '../../hooks/useSelectTypeahead'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
 
 interface TransactionTableProps {
   transactions: TransactionEvent[]
@@ -48,7 +50,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [pageSize] = useState<number>(25)
+  const [pageSize, setPageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
   const pageSizeOptions = useMemo(
     () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
@@ -126,6 +128,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
     {
       key: 'direction',
       header: t('wallet.tx.type'),
+      priority: 'primary',
       render: (tx) => (
         tx.direction === 'in' ? (
           <span className={styles.incoming}><ArrowDownRight size={14} /> {t('wallet.tx.in')}</span>
@@ -139,6 +142,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
     {
       key: 'amount',
       header: t('wallet.tx.amount'),
+      priority: 'primary',
       sortable: true,
       render: (tx) => (
         <span className={`${styles.colAmount} ${tx.direction === 'in' ? styles.amountIn : styles.amountOut}`}>
@@ -148,27 +152,31 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
       width: '16%',
     },
     {
+      key: 'timestamp',
+      header: t('wallet.tx.time'),
+      priority: 'primary',
+      sortable: true,
+      render: (tx) => <span>{formatTimestamp(tx.timestamp, t, i18n.language)}</span>,
+      width: '18%',
+    },
+    {
       key: 'counterparty',
       header: t('wallet.tx.counterparty'),
+      priority: 'secondary',
       render: (tx) => <span title={tx.counterparty}>{truncateAddress(tx.counterparty)}</span>,
       width: '20%',
     },
     {
       key: 'memo',
       header: t('wallet.tx.memo'),
+      priority: 'secondary',
       render: (tx) => (tx.memo ? <span className={styles.memoText}>{tx.memo}</span> : <span className={styles.noMemo}>—</span>),
       width: '22%',
     },
     {
-      key: 'timestamp',
-      header: t('wallet.tx.time'),
-      sortable: true,
-      render: (tx) => <span>{formatTimestamp(tx.timestamp, t, i18n.language)}</span>,
-      width: '18%',
-    },
-    {
       key: 'txHash',
       header: t('wallet.tx.tx'),
+      priority: 'secondary',
       render: (tx) => (
         <a href={`${STELLAR_EXPLORER}/tx/${tx.txHash}`} target="_blank" rel="noopener noreferrer" className={styles.txLink} title={t('a11y.viewOnStellarExplorer')}>
           <ExternalLink size={14} />
@@ -240,6 +248,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
           columns={columns}
           rows={pageItems}
           getRowKey={(tx) => tx.txHash}
+          mobileView="cards"
           maxHeight={520}
           stickyHeader
           emptyState={<div className={styles.emptyState}><Clock size={32} className={styles.emptyIcon} /><p>{t('wallet.tx.noMatches')}</p></div>}
@@ -254,6 +263,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
               <select
                 className={styles.pageSizeSelect}
                 value={pageSize}
+                onKeyDown={handlePageSizeTypeahead}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value))
                   resetToFirstPage()

@@ -20,7 +20,11 @@
  *   cd backend && npm test -- --updateSnapshot --testNamePattern "GET /health"
  */
 
-import express, { type Request, type Response, type NextFunction } from "express";
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from "express";
 import request from "supertest";
 import Database from "better-sqlite3";
 
@@ -40,7 +44,7 @@ function testErrorHandler(
   err: Error,
   _req: Request,
   res: Response,
-  _next: NextFunction,
+  _next: NextFunction
 ): void {
   if (err instanceof AppError) {
     const body: Record<string, unknown> = {
@@ -54,7 +58,9 @@ function testErrorHandler(
     res.status(err.statusCode).json(body);
     return;
   }
-  res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
+  res
+    .status(500)
+    .json({ error: { code: "INTERNAL_ERROR", message: err.message } });
 }
 
 /** Replace all ISO-8601 timestamps with a stable placeholder. */
@@ -72,7 +78,7 @@ function maskTimestamps<T>(value: T): T {
       Object.entries(value as Record<string, unknown>).map(([k, v]) => [
         k,
         maskTimestamps(v),
-      ]),
+      ])
     ) as unknown as T;
   }
   return value;
@@ -81,14 +87,20 @@ function maskTimestamps<T>(value: T): T {
 /** Replace all task IDs (task_<nanoid>) with a stable placeholder. */
 function maskTaskIds<T>(value: T): T {
   if (typeof value === "string") {
-    return value.replace(/task_[A-Za-z0-9_-]{12}/g, "task_SNAPSHOT_ID") as unknown as T;
+    return value.replace(
+      /task_[A-Za-z0-9_-]{12}/g,
+      "task_SNAPSHOT_ID"
+    ) as unknown as T;
   }
   if (Array.isArray(value)) {
     return value.map(maskTaskIds) as unknown as T;
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, maskTaskIds(v)]),
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        maskTaskIds(v),
+      ])
     ) as unknown as T;
   }
   return value;
@@ -178,13 +190,13 @@ describe("Snapshot: GET /health", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "status": "ok",
-  "stellarNetwork": "testnet",
-  "uptime": 42,
-  "version": "0.1.0",
-}
-`);
+      {
+        "status": "ok",
+        "stellarNetwork": "testnet",
+        "uptime": 42,
+        "version": "0.1.0",
+      }
+    `);
   });
 });
 
@@ -204,7 +216,28 @@ describe("Snapshot: GET /api/agents (flat list)", () => {
 
     expect(res.status).toBe(200);
     const stable = maskTimestamps(res.body);
-    expect(stable).toMatchInlineSnapshot(`[]`);
+    expect(stable).toMatchInlineSnapshot(`
+      [
+        {
+          "bondAmountXLM": 10,
+          "capabilities": [
+            "coding",
+            "research",
+          ],
+          "endpoint": "http://127.0.0.1:9999/health",
+          "id": "agent-snapshot-1",
+          "lastActiveAt": "<ISO_TIMESTAMP>",
+          "lastSeenAt": "<ISO_TIMESTAMP>",
+          "last_seen_at": 1788264000,
+          "pricingXLM": 1.5,
+          "reputationScore": 3.5,
+          "status": "online",
+          "stellarPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
+          "tasksCompleted": 42,
+          "tasksFailed": 1,
+        },
+      ]
+    `);
   });
 });
 
@@ -217,46 +250,48 @@ describe("Snapshot: GET /api/agents (cursor paginated)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "_links": {
-    "self": "/api/agents",
-  },
-  "data": {
-    "items": [],
-    "pagination": {
-      "hasNextPage": false,
-      "limit": 10,
-      "nextCursor": null,
-    },
-  },
-}
-`);
+      {
+        "_links": {
+          "self": "/api/agents",
+        },
+        "data": {
+          "items": [],
+          "pagination": {
+            "hasNextPage": false,
+            "limit": 10,
+            "nextCursor": null,
+          },
+        },
+      }
+    `);
   });
 
   it("paginated envelope top-level keys match snapshot", async () => {
-    const res = await request(makeAgentsApp([SEED_AGENT])).get("/api/agents?limit=5");
+    const res = await request(makeAgentsApp([SEED_AGENT])).get(
+      "/api/agents?limit=5"
+    );
 
     expect(res.status).toBe(200);
     // Verify structural shape without dynamic cursor values
     expect(Object.keys(res.body).sort()).toMatchInlineSnapshot(`
-[
-  "_links",
-  "data",
-]
-`);
+      [
+        "_links",
+        "data",
+      ]
+    `);
     expect(Object.keys(res.body.data).sort()).toMatchInlineSnapshot(`
-[
-  "items",
-  "pagination",
-]
-`);
+      [
+        "items",
+        "pagination",
+      ]
+    `);
     expect(Object.keys(res.body.data.pagination).sort()).toMatchInlineSnapshot(`
-[
-  "hasNextPage",
-  "limit",
-  "nextCursor",
-]
-`);
+      [
+        "hasNextPage",
+        "limit",
+        "nextCursor",
+      ]
+    `);
   });
 });
 
@@ -266,30 +301,42 @@ describe("Snapshot: GET /api/agents (cursor paginated)", () => {
 describe("Snapshot: GET /api/agents/:id", () => {
   it("agent detail shape matches snapshot", async () => {
     const res = await request(makeAgentsApp([SEED_AGENT])).get(
-      "/api/agents/agent-snapshot-1",
+      "/api/agents/agent-snapshot-1"
     );
 
     expect(res.status).toBe(200);
     const stable = maskTimestamps(res.body);
     expect(stable).toMatchInlineSnapshot(`
-{
-  "id": "agent-snapshot-1",
-  "capabilities": [
-    "coding",
-    "research",
-  ],
-  "pricingXLM": 1.5,
-  "endpoint": "http://127.0.0.1:9999/health",
-  "stellarPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
-  "reputationScore": 3.5,
-  "lastSeenAt": "<ISO_TIMESTAMP>",
-  "status": "online",
-  "bondAmountXLM": 10,
-  "tasksCompleted": 42,
-  "tasksFailed": 1,
-  "lastActiveAt": "<ISO_TIMESTAMP>",
-}
-`);
+      {
+        "bondAmountXLM": 10,
+        "capabilities": [
+          "coding",
+          "research",
+        ],
+        "endpoint": "http://127.0.0.1:9999/health",
+        "id": "agent-snapshot-1",
+        "lastActiveAt": "<ISO_TIMESTAMP>",
+        "lastSeenAt": "<ISO_TIMESTAMP>",
+        "last_seen_at": 1788264000,
+        "pricingXLM": 1.5,
+        "reputation": {
+          "bondAmountXLM": 10,
+          "bondWeightMultiplier": 1.01,
+          "decayApplied": 0,
+          "latencyScore": 4.5,
+          "overallScore": 3.5,
+          "qualityScore": 4,
+          "taskSuccessScore": 4.88,
+          "tasksCompleted": 42,
+          "tasksFailed": 1,
+        },
+        "reputationScore": 3.5,
+        "status": "online",
+        "stellarPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
+        "tasksCompleted": 42,
+        "tasksFailed": 1,
+      }
+    `);
   });
 
   it("404 error shape matches snapshot", async () => {
@@ -297,10 +344,13 @@ describe("Snapshot: GET /api/agents/:id", () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "error": "Agent not found",
-}
-`);
+      {
+        "error": {
+          "code": "AGENT_NOT_FOUND",
+          "message": "Agent 'non-existent' not found",
+        },
+      }
+    `);
   });
 });
 
@@ -337,7 +387,7 @@ describe("Snapshot: GET /api/tasks/:id", () => {
         inMemoryTaskDb
           .prepare(
             `INSERT INTO tasks (id, prompt, walletPublicKey, status, dagJson, createdAt, updatedAt)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
           )
           .run(
             task.id,
@@ -346,7 +396,7 @@ describe("Snapshot: GET /api/tasks/:id", () => {
             task.status,
             JSON.stringify(task.dag),
             task.createdAt,
-            task.updatedAt,
+            task.updatedAt
           );
       });
 
@@ -369,7 +419,10 @@ describe("Snapshot: GET /api/tasks/:id", () => {
     const create = await request(taskApp)
       .post("/api/tasks")
       .set("walletpublickey", WALLET)
-      .send({ prompt: "Analyse Stellar DEX liquidity trends", maxBudgetXLM: 1 });
+      .send({
+        prompt: "Analyse Stellar DEX liquidity trends",
+        maxBudgetXLM: 1,
+      });
 
     expect(create.status).toBe(201);
     const taskId: string = create.body.taskId;
@@ -381,25 +434,46 @@ describe("Snapshot: GET /api/tasks/:id", () => {
     expect(res.status).toBe(200);
     const stable = stabilise(res.body);
     expect(stable).toMatchInlineSnapshot(`
-{
-  "id": "task_SNAPSHOT_ID",
-  "prompt": "Analyse Stellar DEX liquidity trends",
-  "walletPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
-  "status": "queued",
-  "dag": [
-    {
-      "nodeId": "task_SNAPSHOT_ID_node_0",
-      "type": "research",
-      "dependencies": [],
-      "status": "pending",
-      "prompt": "Analyse Stellar DEX liquidity trends",
-      "description": "Research phase",
-    },
-  ],
-  "createdAt": "<ISO_TIMESTAMP>",
-  "updatedAt": "<ISO_TIMESTAMP>",
-}
-`);
+      {
+        "createdAt": "<ISO_TIMESTAMP>",
+        "dag": [
+          {
+            "dependencies": [],
+            "description": "Research background information for: Analyse Stellar DEX liquidity trends",
+            "nodeId": "node_research",
+            "prompt": "Research background information for: Analyse Stellar DEX liquidity trends",
+            "status": "pending",
+            "type": "research",
+          },
+          {
+            "dependencies": [
+              "node_research",
+            ],
+            "description": "Create design assets",
+            "nodeId": "node_design",
+            "prompt": "Create design assets",
+            "status": "pending",
+            "type": "design",
+          },
+          {
+            "dependencies": [
+              "node_design",
+            ],
+            "description": "Compile and format the final report",
+            "nodeId": "node_report",
+            "prompt": "Compile and format the final report",
+            "status": "pending",
+            "type": "report",
+          },
+        ],
+        "dagJson": "[{"nodeId":"node_research","type":"research","prompt":"Research background information for: Analyse Stellar DEX liquidity trends","description":"Research background information for: Analyse Stellar DEX liquidity trends","status":"pending","dependencies":[]},{"nodeId":"node_design","type":"design","prompt":"Create design assets","description":"Create design assets","status":"pending","dependencies":["node_research"]},{"nodeId":"node_report","type":"report","prompt":"Compile and format the final report","description":"Compile and format the final report","status":"pending","dependencies":["node_design"]}]",
+        "id": "task_SNAPSHOT_ID",
+        "prompt": "Analyse Stellar DEX liquidity trends",
+        "status": "queued",
+        "updatedAt": "<ISO_TIMESTAMP>",
+        "walletPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
+      }
+    `);
   });
 
   it("task 404 error shape matches snapshot", async () => {
@@ -409,10 +483,10 @@ describe("Snapshot: GET /api/tasks/:id", () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "error": "Task not found",
-}
-`);
+      {
+        "error": "Task not found",
+      }
+    `);
   });
 
   it("completed task with result shape matches snapshot", async () => {
@@ -436,7 +510,7 @@ describe("Snapshot: GET /api/tasks/:id", () => {
     ];
     inMemoryTaskDb
       .prepare(
-        "UPDATE tasks SET status = 'completed', dagJson = ?, updatedAt = ? WHERE id = ?",
+        "UPDATE tasks SET status = 'completed', dagJson = ?, updatedAt = ? WHERE id = ?"
       )
       .run(JSON.stringify(completedDag), new Date().toISOString(), taskId);
 
@@ -447,28 +521,29 @@ describe("Snapshot: GET /api/tasks/:id", () => {
     expect(res.status).toBe(200);
     const stable = stabilise(res.body);
     expect(stable).toMatchInlineSnapshot(`
-{
-  "id": "task_SNAPSHOT_ID",
-  "prompt": "Compose a market entry report",
-  "walletPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
-  "status": "completed",
-  "dag": [
-    {
-      "nodeId": "task_SNAPSHOT_ID_node_0",
-      "type": "research",
-      "dependencies": [],
-      "status": "completed",
-      "prompt": "Compose a market entry report",
-      "result": {
-        "summary": "Market entry viable in Q2 2027",
-        "confidence": 0.87,
-      },
-    },
-  ],
-  "createdAt": "<ISO_TIMESTAMP>",
-  "updatedAt": "<ISO_TIMESTAMP>",
-}
-`);
+      {
+        "createdAt": "<ISO_TIMESTAMP>",
+        "dag": [
+          {
+            "dependencies": [],
+            "nodeId": "task_SNAPSHOT_ID_node_0",
+            "prompt": "Compose a market entry report",
+            "result": {
+              "confidence": 0.87,
+              "summary": "Market entry viable in Q2 2027",
+            },
+            "status": "completed",
+            "type": "research",
+          },
+        ],
+        "dagJson": "[{"nodeId":"task_SNAPSHOT_ID_node_0","type":"research","dependencies":[],"status":"completed","prompt":"Compose a market entry report","result":{"summary":"Market entry viable in Q2 2027","confidence":0.87}}]",
+        "id": "task_SNAPSHOT_ID",
+        "prompt": "Compose a market entry report",
+        "status": "completed",
+        "updatedAt": "<ISO_TIMESTAMP>",
+        "walletPublicKey": "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ",
+      }
+    `);
   });
 });
 
@@ -504,32 +579,34 @@ describe("Snapshot: GET /api/payments", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "payments": [],
-  "total": 0,
-}
-`);
+      {
+        "payments": [],
+        "total": 0,
+      }
+    `);
   });
 
   it("populated payment history shape matches snapshot", async () => {
-    const res = await request(makePaymentsApp([SEED_PAYMENT])).get("/api/payments");
+    const res = await request(makePaymentsApp([SEED_PAYMENT])).get(
+      "/api/payments"
+    );
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "payments": [
-    {
-      "taskId": "task_snapshotpay1",
-      "nodeId": "node_1",
-      "balanceId": "balance-snap-abc",
-      "status": "released",
-      "amountStroops": "15000000",
-      "txHash": "txhash-snapshot-001",
-    },
-  ],
-  "total": 1,
-}
-`);
+      {
+        "payments": [
+          {
+            "amountStroops": "15000000",
+            "balanceId": "balance-snap-abc",
+            "nodeId": "node_1",
+            "status": "released",
+            "taskId": "task_snapshotpay1",
+            "txHash": "txhash-snapshot-001",
+          },
+        ],
+        "total": 1,
+      }
+    `);
   });
 
   it("locked payment (null txHash) shape matches snapshot", async () => {
@@ -543,19 +620,19 @@ describe("Snapshot: GET /api/payments", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchInlineSnapshot(`
-{
-  "payments": [
-    {
-      "taskId": "task_snapshotpay1",
-      "nodeId": "node_locked",
-      "balanceId": "balance-snap-abc",
-      "status": "locked",
-      "amountStroops": "15000000",
-      "txHash": null,
-    },
-  ],
-  "total": 1,
-}
-`);
+      {
+        "payments": [
+          {
+            "amountStroops": "15000000",
+            "balanceId": "balance-snap-abc",
+            "nodeId": "node_locked",
+            "status": "locked",
+            "taskId": "task_snapshotpay1",
+            "txHash": null,
+          },
+        ],
+        "total": 1,
+      }
+    `);
   });
 });

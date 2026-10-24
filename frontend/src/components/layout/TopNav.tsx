@@ -8,9 +8,54 @@ import { NotificationBell } from '../notifications/NotificationBell'
 import { SUPPORTED_LANGUAGES } from '../../i18n/options'
 import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
+import type { WsConnectionState } from '../../hooks/useAgentStatusSocket'
 import './TopNav.css'
 import useTheme from '../../hooks/useTheme'
-import { Sun, Moon, Monitor, Wallet } from 'lucide-react'
+import { Sun, Moon, Wallet } from 'lucide-react'
+
+// ── WS status indicator ────────────────────────────────────────────────────
+
+const WS_STATUS_COLORS: Record<WsConnectionState, string> = {
+  connecting: 'var(--status-warning-text)',
+  connected: 'var(--status-success-text, #22c55e)',
+  reconnecting: 'var(--status-warning-text)',
+  disconnected: 'var(--status-danger-text, #ef4444)',
+  error: 'var(--status-danger-text, #ef4444)',
+  fallback: 'var(--accent-info, #60a5fa)',
+}
+
+interface WsStatusIndicatorProps {
+  state: WsConnectionState
+}
+
+const WsStatusIndicator: React.FC<WsStatusIndicatorProps> = ({ state }) => {
+  const { t } = useTranslation()
+  const label = t(`ws.status.${state}`, { defaultValue: state })
+  const color = WS_STATUS_COLORS[state]
+  const isPulsing = state === 'connecting' || state === 'reconnecting'
+
+  return (
+    <span
+      className="ws-status-indicator"
+      aria-label={`Agent network: ${label}`}
+      title={`Agent network: ${label}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: color,
+          display: 'inline-block',
+          animation: isPulsing ? 'ws-pulse 1.4s ease-in-out infinite' : 'none',
+        }}
+        aria-hidden="true"
+      />
+      <span aria-hidden="true">{label}</span>
+    </span>
+  )
+}
 
 interface TopNavProps {
   onMenuClick: () => void
@@ -18,6 +63,8 @@ interface TopNavProps {
   sidebarCollapsed: boolean
   isMobile: boolean
   isDrawerOpen?: boolean
+  /** Current WebSocket connection state for the agent status indicator. */
+  wsConnectionState?: WsConnectionState
 }
 
 /**
@@ -32,6 +79,7 @@ const LANGUAGE_OPTIONS: Record<
   { flag: string; nativeName: string; shortLabel: string }
 > = {
   en: { flag: '🇬🇧', nativeName: 'English', shortLabel: 'EN' },
+  es: { flag: '🇪🇸', nativeName: 'Español', shortLabel: 'ES' },
   zh: { flag: '🇨🇳', nativeName: '中文', shortLabel: '中文' },
 }
 
@@ -41,13 +89,14 @@ const TopNav: React.FC<TopNavProps> = ({
   sidebarCollapsed, 
   isMobile,
   isDrawerOpen = false,
+  wsConnectionState,
 }) => {
   const { publicKey, connected, ready, connectionMethod, connectFreighter, disconnect } = useWallet()
   const { balance, loading: balanceLoading } = useWalletBalance(publicKey)
   const { showToast } = useToast()
   const { t, i18n } = useTranslation()
   const location = useLocation()
-  const { mode, setMode } = useTheme()
+  const { setMode, effectiveTheme } = useTheme()
   const [isConnecting, setIsConnecting] = useState(false)
 
   const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
@@ -126,6 +175,9 @@ const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       <div className="nav-right">
+        {wsConnectionState !== undefined && (
+          <WsStatusIndicator state={wsConnectionState} />
+        )}
         <NotificationBell />
 
         <button

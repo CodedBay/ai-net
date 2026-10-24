@@ -5,20 +5,12 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
+import { useToast } from '../../hooks/useToast'
 import { signTransactionWithFreighter } from '../../services/freighter'
 import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
-
-function isValidStellarAddress(address: string): boolean {
-  try {
-    Keypair.fromPublicKey(address)
-    return true
-  } catch {
-    return false
-  }
-}
 
 interface ConfirmationData {
   destination: string
@@ -32,11 +24,6 @@ export function SendXLMForm() {
   const { balance } = useWalletBalance(publicKey)
   const { showToast } = useToast()
 
-  const [destination, setDestination] = useState('')
-  const [amount, setAmount] = useState('')
-  const [memo, setMemo] = useState('')
-  const [errors, setErrors] = useState<{ destination?: string; amount?: string }>({})
-  const [touched, setTouched] = useState<{ destination?: boolean; amount?: boolean }>({})
   const [confirmation, setConfirmation] = useState<ConfirmationData | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [successTx, setSuccessTx] = useState<string | null>(null)
@@ -70,9 +57,9 @@ export function SendXLMForm() {
 
   const handleSendClick = (data: WalletTransferValues) => {
     setConfirmation({
-      destination: destination.trim(),
-      amount,
-      memo: memo.trim(),
+      destination: data.destination.trim(),
+      amount: String(data.amount),
+      memo: (data.memo ?? '').trim(),
     })
   }
 

@@ -121,6 +121,10 @@ cargo test
 
 ## 4. Wallet Setup (Freighter Browser Extension)
 
+For the dedicated 10-minute guide, including testnet funding alternatives,
+network verification, mobile-wallet limitations, and troubleshooting, see the
+[Freighter Wallet Setup Guide](WALLET_SETUP.md).
+
 To test the frontend with on-chain payments:
 
 1. Install the **[Freighter Wallet Extension](https://www.freighter.app/)** for Chrome / Firefox / Brave.

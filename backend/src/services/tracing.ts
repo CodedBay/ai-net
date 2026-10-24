@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { SpanStatus, Trace, TraceSpan } from './tracing.types';
 import { createLogger } from '../utils/logger';
+import { currentSpanId } from './traceContext';
 
 const logger = createLogger({ service: 'ai-net-backend' });
 
@@ -40,11 +41,13 @@ export class TracingService {
     correlationId: string,
     service: string,
     operation: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    parentSpanId?: string,
   ): TraceSpan {
     const span: TraceSpan = {
       spanId: randomUUID(),
       correlationId,
+      ...(parentSpanId ?? currentSpanId() ? { parentSpanId: parentSpanId ?? currentSpanId() } : {}),
       service,
       operation,
       startedAt: new Date().toISOString(),
@@ -114,6 +117,8 @@ export class TracingService {
       },
       'span_end',
     );
+
+    void this.exportSpan(span);
   }
 
   /**
@@ -183,6 +188,49 @@ export class TracingService {
   /** Total number of active trace buckets (useful for monitoring). */
   get size(): number {
     return this.traces.size;
+  }
+
+  private async exportSpan(span: TraceSpan): Promise<void> {
+    const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318/v1/traces';
+    const startTimeUnixNano = String(Date.parse(span.startedAt) * 1_000_000);
+    const endTimeUnixNano = String(Date.parse(span.endedAt ?? span.startedAt) * 1_000_000);
+    const attributes = Object.entries(span.metadata ?? {}).map(([key, value]) => ({
+      key,
+      value: typeof value === 'number'
+        ? { doubleValue: value }
+        : typeof value === 'boolean'
+          ? { boolValue: value }
+          : { stringValue: String(value) },
+    }));
+
+    try {
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          resourceSpans: [{
+            resource: { attributes: [{ key: 'service.name', value: { stringValue: span.service } }] },
+            scopeSpans: [{
+              scope: { name: 'ai-net' },
+              spans: [{
+                traceId: span.correlationId.replace(/-/g, '').slice(-32).padStart(32, '0'),
+                spanId: span.spanId.replace(/-/g, '').slice(-16).padStart(16, '0'),
+                ...(span.parentSpanId ? { parentSpanId: span.parentSpanId.replace(/-/g, '').slice(-16).padStart(16, '0') } : {}),
+                name: `${span.service}.${span.operation}`,
+                kind: 1,
+                startTimeUnixNano,
+                endTimeUnixNano,
+                attributes,
+                status: { code: span.status === 'failed' ? 2 : 1 },
+              }],
+            }],
+          }],
+        }),
+      });
+    } catch (err) {
+      logger.warn({ err, traceId: span.correlationId }, 'OTLP span export failed');
+    }
   }
 }
 

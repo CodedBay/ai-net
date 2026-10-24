@@ -1,4 +1,5 @@
 import http from 'http';
+import { randomUUID } from 'crypto';
 import supertest from 'supertest';
 import type { Server as HttpServer } from 'http';
 
@@ -6,12 +7,15 @@ import { createApp } from '../../backend/src/api/app';
 import type { DispatchFn, PaymentReleaseFn } from '../../backend/src/coordinator/coordinator';
 import type { DAGNode } from '../../backend/src/types/task';
 import type { AgentResult } from '../../backend/src/agents/research/types';
+import { Keypair } from '@stellar/stellar-sdk';
 import { MOCK_CONTRACT_IDS } from './helpers';
 
 process.env.NODE_ENV = 'test';
 process.env.SKIP_STELLAR_ACCOUNT_VERIFY = 'true';
 process.env.REGISTRY_CONTRACT_ID = MOCK_CONTRACT_IDS.REGISTRY;
 process.env.ERROR_RESOLVER_CONTRACT_ID = MOCK_CONTRACT_IDS.ERROR_RESOLVER;
+
+const E2E_WALLET = Keypair.random().publicKey();
 
 const PROMPT =
   'Generate a market-entry report for solar energy in Southeast Asia, including software implementation and UI design';
@@ -114,6 +118,8 @@ let request: ReturnType<typeof supertest>;
 let closeApp: () => void;
 
 beforeAll(done => {
+  // Reset the shared array before this suite so other suites' releases don't
+  // pollute the "releases payment exactly once per node" assertion.
   paymentReleases.length = 0;
 
   const app = createApp({ dispatch: mockDispatch, releasePayment: mockReleasePayment });
@@ -126,6 +132,8 @@ beforeAll(done => {
 
 afterAll(done => {
   closeApp();
+  // Clear again so any subsequent suite that runs on the same worker starts clean.
+  paymentReleases.length = 0;
   done();
 });
 
@@ -138,7 +146,7 @@ async function pollUntilStatus(
   while (Date.now() < deadline) {
     const res = await request
       .get(`/api/tasks/${taskId}`)
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+      .set('walletpublickey', E2E_WALLET);
     if (res.status === 200 && res.body.status === targetStatus) {
       return res.body as Record<string, unknown>;
     }
@@ -154,8 +162,8 @@ describe('Full Pipeline E2E', () => {
   it('submits a task and the full 5-node DAG completes', async () => {
     const res = await request
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .set('walletpublickey', E2E_WALLET)
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     expect(res.status).toBe(201);
     expect(res.body.taskId).toMatch(/^task_/);
@@ -177,10 +185,13 @@ describe('Full Pipeline E2E', () => {
   });
 
   it('releases payment exactly once per node', () => {
-    expect(paymentReleases).toHaveLength(5);
-    const releasedNodeIds = paymentReleases.map(r => r.nodeId).sort();
+    // Only count releases belonging to this suite's task (other suites share
+    // the module-level mockReleasePayment and would otherwise pollute the array).
+    const taskReleases = paymentReleases.filter(r => r.taskId === taskId);
+    expect(taskReleases).toHaveLength(5);
+    const releasedNodeIds = taskReleases.map(r => r.nodeId).sort();
     expect(releasedNodeIds).toEqual([...AGENT_NODE_IDS].sort());
-    for (const r of paymentReleases) {
+    for (const r of taskReleases) {
       expect(r.taskId).toBe(taskId);
     }
   });
@@ -199,14 +210,14 @@ describe('Full Pipeline E2E', () => {
   it('returns 404 for unknown taskId', async () => {
     const res = await request
       .get('/api/tasks/task_doesnotexist')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+      .set('walletpublickey', E2E_WALLET);
     expect(res.status).toBe(404);
   });
 
   it('returns 400 when prompt is missing', async () => {
     const res = await request
       .post('/api/tasks')
-      .send({ walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .send({ walletPublicKey: E2E_WALLET });
     expect(res.status).toBe(400);
   });
 });
@@ -237,8 +248,8 @@ describe('Full Pipeline E2E — agent failure', () => {
 
     const res = await req
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .set('walletpublickey', E2E_WALLET)
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     expect(res.status).toBe(201);
     const failTaskId = res.body.taskId as string;
@@ -249,7 +260,7 @@ describe('Full Pipeline E2E — agent failure', () => {
       await new Promise(r => setTimeout(r, 200));
       const getRes = await req
         .get(`/api/tasks/${failTaskId}`)
-        .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+        .set('walletpublickey', E2E_WALLET);
       status = getRes.body.status as string;
       if (status === 'failed' || status === 'completed') break;
     }
@@ -279,13 +290,13 @@ describe('Full Pipeline E2E — Idempotency', () => {
   });
 
   it('submitting the same task twice with the same Idempotency-Key returns the same taskId', async () => {
-    const idempotencyKey = `idem-test-${Date.now()}`;
+    const idempotencyKey = randomUUID();
 
     const res1 = await idempotentRequest
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
+      .set('walletpublickey', E2E_WALLET)
       .set('Idempotency-Key', idempotencyKey)
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     expect(res1.status).toBe(201);
     const firstTaskId = res1.body.taskId as string;
@@ -294,9 +305,9 @@ describe('Full Pipeline E2E — Idempotency', () => {
     // Second identical submission with same idempotency key
     const res2 = await idempotentRequest
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
+      .set('walletpublickey', E2E_WALLET)
       .set('Idempotency-Key', idempotencyKey)
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     // Should return 200 (cached) or 201 with the same taskId
     expect([200, 201]).toContain(res2.status);
@@ -306,15 +317,15 @@ describe('Full Pipeline E2E — Idempotency', () => {
   it('different Idempotency-Key values produce different task IDs', async () => {
     const res1 = await idempotentRequest
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-      .set('Idempotency-Key', `key-a-${Date.now()}`)
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .set('walletpublickey', E2E_WALLET)
+      .set('Idempotency-Key', randomUUID())
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     const res2 = await idempotentRequest
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-      .set('Idempotency-Key', `key-b-${Date.now()}`)
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+      .set('walletpublickey', E2E_WALLET)
+      .set('Idempotency-Key', randomUUID())
+      .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
     expect(res1.status).toBe(201);
     expect(res2.status).toBe(201);
@@ -390,8 +401,8 @@ describeStellar('Full Pipeline E2E — Stellar Testnet Payments', () => {
     async () => {
       const res = await stellarRequest
         .post('/api/tasks')
-        .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-        .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETPUBLICKEY' });
+        .set('walletpublickey', E2E_WALLET)
+        .send({ prompt: PROMPT, walletPublicKey: E2E_WALLET });
 
       expect(res.status).toBe(201);
       testTaskId = res.body.taskId as string;
@@ -404,7 +415,7 @@ describeStellar('Full Pipeline E2E — Stellar Testnet Payments', () => {
       while (Date.now() < deadline) {
         const getRes = await stellarRequest
           .get(`/api/tasks/${testTaskId}`)
-          .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+          .set('walletpublickey', E2E_WALLET);
         finalStatus = getRes.body.status as string;
         if (finalStatus === 'completed' || finalStatus === 'failed') break;
         await new Promise((r) => setTimeout(r, 200));
@@ -420,7 +431,7 @@ describeStellar('Full Pipeline E2E — Stellar Testnet Payments', () => {
 
     const res = await stellarRequest
       .get(`/api/tasks/${testTaskId}`)
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+      .set('walletpublickey', E2E_WALLET);
 
     const dag = res.body.dag as Array<{ nodeId: string; result?: { summary?: string } }>;
     const reportNode = dag.find((n) => n.nodeId === 'node_report');
@@ -516,7 +527,7 @@ describeStellar('Full Pipeline E2E — Stellar Testnet Payments', () => {
       // (on-chain verification requires Soroban RPC calls in a full integration test).
       const res = await stellarRequest
         .get(`/api/tasks/${testTaskId}`)
-        .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+        .set('walletpublickey', E2E_WALLET);
 
       expect(res.status).toBe(200);
 
@@ -534,7 +545,7 @@ describeStellar('Full Pipeline E2E — Stellar Testnet Payments', () => {
 
         const repRes = await stellarRequest
           .get(`/api/agents/${encodeURIComponent(agentAddress)}/reputation`)
-          .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+          .set('walletpublickey', E2E_WALLET);
 
         if (repRes.status === 200) {
           // Reputation should be non-null and reflect completed tasks

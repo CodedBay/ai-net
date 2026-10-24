@@ -1,0 +1,26 @@
+/* Error illustration container — responsive sizing */
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.svg {
+  width: 100%;
+  height: auto;
+  max-height: 240px;
+}
+
+/* Scale down on mobile */
+@media (max-width: 480px) {
+  .container {
+    max-width: 280px;
+  }
+
+  .svg {
+    max-height: 180px;
+  }
+}

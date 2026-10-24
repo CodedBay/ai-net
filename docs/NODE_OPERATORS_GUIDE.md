@@ -2,6 +2,8 @@
 
 Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provides step-by-step instructions for provisioning, configuring, deploying, funding, operating, and monitoring a production-ready or testnet payment and agent coordination node on the **Stellar blockchain**.
 
+For agent bond accounting, current contract limitations, and illustrative sizing guidance, see the [Staking Guide](STAKING_GUIDE.md).
+
 ---
 
 ## Table of Contents
@@ -47,7 +49,7 @@ An **ai-net Node** is an autonomous coordination daemon that connects AI agents 
 ### Node Roles
 
 - **Coordinator Node**: Accepts user workflow requests, decomposes tasks into a directed acyclic graph (DAG), matches specialized agents via the on-chain Registry, and coordinates execution.
-- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and enforce SLA bonds.
+- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and track agent SLA bond accounting.
 - **Specialized Agent Worker**: Runs dedicated reasoning workers (Research, Coding, Design, Risk, Report) communicating with LLM inference engines.
 
 ---
@@ -232,12 +234,22 @@ Check that the balance is loaded:
 curl "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" | jq '.balances'
 ```
 
-### Step 6.3: Escrow Liquidity Guidelines
+### Step 6.3: Agent Staking & Bond Management
+
+Agent registration records a declared bond amount in the `agent_registry` contract; the current contract does not escrow XLM for it. For contract limitations, minimums, slash accounting, cooldown, CLI commands, and illustrative economics, see the **[Staking Guide](STAKING_GUIDE.md)**.
+
+Key points:
+- Default global minimum: **10 XLM** (`100,000,000` stroops), configurable by the contract admin; query `get_min_bond` before registration.
+- The registry records this amount but does not transfer or hold XLM. No economist-reviewed capability-specific recommendation is currently available.
+- A failing SLA check reduces the recorded amount by 10%; an admin can also invoke `slash_bond`. The contract has no automatic repeated-violation freeze threshold.
+- Deregistration uses a two-call process with a 17,280-ledger cooldown. The second call emits a bond-return event but does not transfer XLM.
+
+### Step 6.4: Escrow Liquidity Guidelines
 
 - **Base Reserve**: Keep at least **10 XLM** in the coordinator hot wallet for ledger reserves and network gas.
 - **Escrow Buffer**: Deposit operational funds into the `payment_escrow` contract or keep an automated monitoring alert when the balance drops below **50 XLM**.
 
-### Step 6.4: Payment Lifecycle & Escrow Verification
+### Step 6.5: Payment Lifecycle & Escrow Verification
 
 For a complete architectural visual reference of task funding, sealed bidding, escrow locking/release/refund flows, and juror dispute voting, consult the [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).
 
@@ -414,6 +426,8 @@ Monitor the logs (`journalctl -u ainet-node -f` or `docker compose logs -f`) to 
 ---
 
 ## 9. Observability, Metrics & Health Monitoring
+
+> For a complete step-by-step guide to setting up the full Prometheus + Grafana + Loki monitoring stack, importing dashboards, configuring alert channels, and troubleshooting, see **[MONITORING_SETUP.md](./MONITORING_SETUP.md)**.
 
 ### Prometheus Metrics
 

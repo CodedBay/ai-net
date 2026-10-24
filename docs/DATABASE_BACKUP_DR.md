@@ -31,7 +31,11 @@ These objectives are achievable because backups run daily at 02:00 UTC and full 
 
 ### Schedule
 
-Backups run **daily at 02:00 UTC**. Deploy via one of:
+Production backups run **daily at 02:00 UTC**. A separate GitHub Actions
+workflow verifies synthetic SQLite backups weekly and can upload the verified
+artifacts to the Terraform-managed backup verification bucket when its OIDC
+role and `BACKUP_VERIFY_AWS_ROLE_ARN` / `BACKUP_VERIFY_TEST_BUCKET` repository
+variables are configured. Deploy production backups via one of:
 
 **Option A — cron (on the backend host):**
 
@@ -65,7 +69,18 @@ The manifest contains the SHA-256 checksum of each compressed file, the S3 key, 
 
 ### S3 Retention Policy
 
-Configure a 30-day lifecycle rule on the backup bucket:
+The Terraform-managed SQLite backup bucket expires objects after 90 days. The
+workflow test bucket is isolated from production data and also uses a 90-day
+lifecycle. For local verification, use disposable fixture databases and a
+temporary output directory; this mode needs no AWS credentials:
+
+```bash
+DB_DIR=/tmp/ai-net-backup-fixtures \
+  ./backend/scripts/backup-databases.sh --local --integrity-check \
+  --output-dir /tmp/ai-net-verified-backups
+```
+
+Configure a 90-day lifecycle rule on the backup bucket:
 
 ```json
 {
@@ -74,8 +89,7 @@ Configure a 30-day lifecycle rule on the backup bucket:
       "ID": "ai-net-sqlite-backup-retention",
       "Status": "Enabled",
       "Filter": { "Prefix": "backups/sqlite/" },
-      "Expiration": { "Days": 30 },
-      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 }
+      "Expiration": { "Days": 90 }
     }
   ]
 }
@@ -119,7 +133,7 @@ cd backend
 
 | Variable | Description | Required |
 |---|---|---|
-| `S3_BACKUP_BUCKET` | S3 bucket name | ✅ Yes |
+| `S3_BACKUP_BUCKET` | S3 bucket name | ✅ Yes for S3 mode; not required for `--local` |
 | `DB_DIR` | Directory containing `.db` files | ✅ Yes (default: `/app/data`) |
 | `S3_BACKUP_PREFIX` | S3 key prefix | No (default: `backups/sqlite`) |
 | `SLACK_WEBHOOK_URL` | Slack webhook for failure alerts | No |

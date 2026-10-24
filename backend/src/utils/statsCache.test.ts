@@ -1,4 +1,5 @@
 import { StatsCache } from './statsCache';
+import type { StatsResponse } from '../types/stats';
 
 describe('StatsCache', () => {
   it('caches the first result for the TTL and avoids duplicate computation', async () => {
@@ -6,7 +7,7 @@ describe('StatsCache', () => {
     const cache = new StatsCache({
       ttlMs: 60_000,
       now: () => 1_000,
-      computeStats: async () => {
+      computeStats: async (): Promise<StatsResponse> => {
         calls += 1;
         return {
           totalAgents: 1,
@@ -14,7 +15,9 @@ describe('StatsCache', () => {
           totalXLMTransacted: 0,
           uptimePercent: 100,
           tasksLast24h: [],
-          xlmLast24h: []
+          xlmLast24h: [],
+          tasksLast7d: [],
+          xlmLast7d: []
         };
       }
     });
@@ -32,7 +35,7 @@ describe('StatsCache', () => {
     const cache = new StatsCache({
       ttlMs: 60_000,
       now: () => now,
-      computeStats: async () => {
+      computeStats: async (): Promise<StatsResponse> => {
         calls += 1;
         return {
           totalAgents: 1,
@@ -40,7 +43,9 @@ describe('StatsCache', () => {
           totalXLMTransacted: 0,
           uptimePercent: 100,
           tasksLast24h: [],
-          xlmLast24h: []
+          xlmLast24h: [],
+          tasksLast7d: [],
+          xlmLast7d: []
         };
       }
     });

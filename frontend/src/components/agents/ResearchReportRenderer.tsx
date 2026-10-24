@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useState, useEffect, useRef } from 'react';
+import React, { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,64 +9,20 @@ import { getMarkdown } from '../../utils/agentUtils';
 import ThemeContext from '../../context/ThemeContext';
 import CopyButton from '../common/CopyButton';
 import CollapsibleSection from '../common/CollapsibleSection';
+import { useLightbox } from '../../hooks/useLightbox';
+import type { LightboxImage } from '../../hooks/useLightbox';
+import { ImageLightbox } from '../common/ImageLightbox';
+import '../../styles/report.css';
 
 interface Props {
   result: ResearchReportResult | null | undefined;
   searchQuery?: string;
 }
 
-interface Heading {
-  level: number;
-  text: string;
-  id: string;
-}
-
-const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
+const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
   const { effectiveTheme } = useContext(ThemeContext);
   const markdown = getMarkdown(result);
-  const [headings, setHeadings] = useState<Heading[]>([]);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!contentRef.current) return;
-
-    const headingElements = contentRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    const headingList: Heading[] = [];
-    let h2Count = 0;
-    let h3Count = 0;
-
-    headingElements.forEach((heading, idx) => {
-      const level = parseInt(heading.tagName[1]);
-      const text = heading.textContent || '';
-      const id = `heading-${idx}`;
-
-      if (level === 2) {
-        h2Count++;
-        h3Count = 0;
-        heading.textContent = `${h2Count}. ${text}`;
-      } else if (level === 3) {
-        h3Count++;
-        heading.textContent = `${h2Count}.${h3Count} ${text}`;
-      }
-
-      heading.id = id;
-      heading.classList.add('report-heading');
-
-      const link = document.createElement('a');
-      link.href = `#${id}`;
-      link.className = 'heading-anchor';
-      link.setAttribute('aria-label', `Link to ${text}`);
-      link.innerHTML = '🔗';
-      heading.appendChild(link);
-
-      if (level <= 3) {
-        headingList.push({ level, text, id });
-      }
-    });
-
-    setHeadings(headingList);
-  }, [markdown]);
 
   if (!markdown) {
     return (
@@ -180,6 +136,19 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               </code>
             );
           },
+          img({ src, alt, title }: { src?: string; alt?: string; title?: string }) {
+            const imageIndex = images.findIndex((image) => image.url === src);
+            return (
+              <button
+                type="button"
+                onClick={() => lightbox.openLightbox(images, Math.max(imageIndex, 0))}
+                aria-label={`Open image: ${alt || title || 'report image'}`}
+                style={{ display: 'block', maxWidth: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'zoom-in' }}
+              >
+                <img src={src} alt={alt ?? ''} title={title} style={{ maxWidth: '100%', height: 'auto' }} />
+              </button>
+            );
+          },
           a({ href, children }: any) {
             return (
               <a
@@ -256,6 +225,24 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
         {markdown}
       </ReactMarkdown>
     </div>
+      <ImageLightbox
+        isOpen={lightbox.isOpen}
+        images={lightbox.images}
+        currentIndex={lightbox.currentIndex}
+        scale={lightbox.scale}
+        position={lightbox.position}
+        onClose={lightbox.closeLightbox}
+        onPrev={lightbox.prevImage}
+        onNext={lightbox.nextImage}
+        onSelectIndex={lightbox.setIndex}
+        onZoomIn={lightbox.zoomIn}
+        onZoomOut={lightbox.zoomOut}
+        onResetZoom={lightbox.resetZoom}
+        onWheel={lightbox.handleWheel}
+        onPinch={lightbox.handlePinch}
+        onPositionChange={lightbox.setPosition}
+      />
+    </>
   );
 
   if (isLongReport) {

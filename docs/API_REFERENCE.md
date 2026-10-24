@@ -4,6 +4,8 @@ Comprehensive reference for the **AI-Net Decentralized AI Agent Network API**.
 Covers authentication, error taxonomy, rate limits, idempotency, versioning,
 request/response schemas, and copy-paste `curl` examples for every endpoint.
 
+For API versioning rules, historical changes, deprecations, and migration examples, see the [API Changelog](./API_CHANGELOG.md).
+
 ---
 
 ## Table of Contents
@@ -69,11 +71,14 @@ walletpublickey: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
 ### 2.3 Admin API Key
 
 Admin endpoints require an `X-Admin-API-Key` header or a Bearer token whose
-subject matches the configured admin key:
+subject matches the configured key (`ADMIN_API_KEY`):
 
 ```http
 X-Admin-API-Key: <admin_api_key>
 ```
+
+Missing, invalid, or unconfigured admin credentials always return
+`403 Forbidden`. The server never reveals whether admin access is enabled.
 
 ### 2.4 Unauthenticated Endpoints
 
@@ -194,16 +199,21 @@ tasks per 24 h). Exceeding it returns:
 ## 7. Idempotency
 
 Mutating endpoints (`POST /api/tasks`, `POST /api/agents/register`) support the
-`Idempotency-Key` header. Supply a client-generated UUID v4:
+`Idempotency-Key` header. Supply a client-generated **UUID v4**:
 
 ```http
 Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 ```
 
-- If the server receives the same key with the **same payload** within 24 h it
-  returns the cached response from the first request.
-- If the same key arrives with a **different payload** it returns `409 Conflict`.
-- Missing the header means no idempotency protection (safe to omit on reads).
+| Scenario | Behaviour |
+|---|---|
+| First request | Processed normally; response cached for 24 h, scoped to the submitting wallet |
+| Same key + same payload within 24 h | Original response replayed (HTTP `200` or `201`), `X-Idempotency-Replay: true` header set |
+| Same key + **different payload** within 24 h | `409 Conflict` with code `IDEMPOTENCY_PAYLOAD_MISMATCH` |
+| Key present but **not valid UUID v4** | `422 Unprocessable Entity` with code `INVALID_IDEMPOTENCY_KEY` |
+| Key absent | No idempotency protection; safe to omit on reads |
+
+Keys expire after **24 hours**. After expiry the same key value may be reused and will be treated as a new first request. Idempotency is scoped to the submitting wallet address — the same UUID supplied by two different wallets creates two independent entries.
 
 ---
 
@@ -1012,6 +1022,45 @@ curl -s "http://localhost:3000/api/tasks?page=1&pageSize=5&status=completed" \
 
 ---
 
+#### `GET /api/tasks/estimate`
+
+Returns a pre-submission cost estimate for one or more specialist agents. The
+endpoint is available on both v1 and v2; v2 wraps the estimate in a `data`
+envelope. Agent selections may be sent as a comma-separated `agents` value or
+as repeated `agentHints` values.
+
+**Query Parameters**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `agents` | `string` | One of `agents` / `agentHints` | Comma-separated agents: `research`, `risk`, `coding`, `design`, `report` |
+| `agentHints` | `string` | One of `agents` / `agentHints` | Repeatable agent selection, e.g. `?agentHints=research&agentHints=report` |
+
+**Request**
+```bash
+curl -s "http://localhost:3000/api/tasks/estimate?agents=research,coding"
+```
+
+**Response `200 OK`**
+```json
+{
+  "currency": "XLM",
+  "breakdown": [
+    { "agent": "research", "costXLM": 0.5 },
+    { "agent": "coding", "costXLM": 0.8 }
+  ],
+  "subtotalXLM": 1.3,
+  "platformFeeXLM": 0.065,
+  "platformFeeRate": 0.05,
+  "estimatedCostXLM": 1.365
+}
+```
+
+An empty selection or an unknown agent name returns `400 Bad Request` with an
+`INVALID_AGENTS` error code.
+
+---
+
 #### `GET /api/tasks/:id`
 
 Returns full task details including the DAG, per-node results, and execution
@@ -1116,6 +1165,31 @@ data: {"taskId":"task_ab12cd34ef56","status":"completed","percentage":100}
 ```json
 { "error": "Task not found" }
 ```
+
+---
+
+#### `WS /ws` (agent-status stream)
+
+Upgrades to a WebSocket connection that broadcasts agent health changes in
+real time. The connection is read-only and requires no authentication.
+
+**Request**
+```bash
+websocat "ws://localhost:3001/ws"
+```
+
+**Server messages** share the standard envelope
+(`{ event, payload, timestamp, correlationId? }`):
+
+| Event | Description |
+|---|---|
+| `agents:snapshot` | Sent immediately on connect with `{ agents: [{ id, capabilities, status, lastSeenAt }] }` so the client can hydrate without a REST call. |
+| `agent:status` | An agent's health changed. Payload: `{ agentId, name, capability, oldStatus, newStatus, lastHeartbeat }`. |
+| `{"type":"ping"}` | Heartbeat every 30 s. Clients reply with `{"type":"pong"}` or the connection is closed after `WS_PONG_TIMEOUT_MS`. |
+
+Concurrent connections are capped per client IP
+(`WS_MAX_CONNECTIONS_PER_CLIENT`, default 5); excess upgrades are rejected
+with HTTP `429`.
 
 ---
 
@@ -1245,8 +1319,186 @@ curl -s http://localhost:3000/api/reconciliation/report
 
 ### 9.7 Admin (`/api/admin`)
 
-All admin endpoints require `X-Admin-API-Key` or a Bearer admin token unless
-otherwise noted. Unauthenticated requests return `401 Unauthorized`.
+All admin endpoints require `X-Admin-API-Key` or
+`Authorization: Bearer <admin_key>` unless otherwise noted. Missing, invalid,
+or unconfigured keys return `403 Forbidden`.
+
+---
+
+#### `GET /api/admin/stats`
+
+Platform-wide metrics used by the admin console.
+
+**Request**
+```bash
+curl -s http://localhost:3000/api/admin/stats \
+  -H "X-Admin-API-Key: <admin_key>"
+```
+
+**Response `200 OK`**
+```json
+{
+  "generatedAt": "2026-10-20T12:00:00.000Z",
+  "agents": { "total": 12, "online": 9, "offline": 3, "banned": 1 },
+  "tasks": {
+    "total": 348,
+    "queued": 4,
+    "running": 2,
+    "completed": 320,
+    "failed": 12,
+    "cancelled": 10,
+    "last24h": 45
+  },
+  "xlm": { "released": 1250.75, "locked": 25.5, "total": 1276.25 }
+}
+```
+
+**Response `403 Forbidden`**
+```json
+{ "error": "Forbidden" }
+```
+
+---
+
+#### `GET /api/admin/tasks`
+
+Lists every task on the platform, newest first, with filters and pagination.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `status` | `string` | `queued`, `running`, `completed`, `failed`, or `cancelled` |
+| `wallet` | `string` | Filter by `walletPublicKey` (alias: `walletAddress`) |
+| `from` | ISO-8601 | Only tasks created at or after this timestamp |
+| `to` | ISO-8601 | Only tasks created at or before this timestamp |
+| `limit` | `integer` | Page size, 1–100 (default `20`) |
+| `offset` | `integer` | Rows to skip (default `0`) |
+
+**Request**
+```bash
+curl -s "http://localhost:3000/api/admin/tasks?status=failed&limit=25" \
+  -H "X-Admin-API-Key: <admin_key>"
+```
+
+**Response `200 OK`**
+```json
+{
+  "tasks": [
+    {
+      "id": "task_ab12cd34ef56",
+      "prompt": "Research the XLM market",
+      "walletPublicKey": "G...",
+      "status": "failed",
+      "createdAt": "2026-10-20T10:00:00.000Z",
+      "updatedAt": "2026-10-20T10:01:00.000Z"
+    }
+  ],
+  "total": 1,
+  "limit": 25,
+  "offset": 0
+}
+```
+
+**Response `400 Bad Request`**
+```json
+{ "error": "INVALID_QUERY", "details": { "fieldErrors": { "status": ["..."] } } }
+```
+
+---
+
+#### `DELETE /api/admin/tasks/:id`
+
+Force-cancels any task regardless of wallet ownership. Cancels the queued job
+and refunds locked payments where possible.
+
+**Request**
+```bash
+curl -s -X DELETE http://localhost:3000/api/admin/tasks/task_ab12cd34ef56 \
+  -H "X-Admin-API-Key: <admin_key>"
+```
+
+**Response `200 OK`**
+```json
+{
+  "taskId": "task_ab12cd34ef56",
+  "status": "cancelled",
+  "refundTxHashes": ["a1b2c3..."],
+  "task": { /* full task object */ }
+}
+```
+
+**Response `409 Conflict`** — task already completed, failed, or cancelled.
+**Response `404 Not Found`** — unknown task id.
+
+---
+
+#### `POST /api/admin/agents/:id/ban`
+
+Bans an agent and marks it offline. Banned agents are excluded from all new
+task assignments (including dispatch fallbacks) until unbanned.
+
+**Request**
+```bash
+curl -s -X POST http://localhost:3000/api/admin/agents/agent_research_01/ban \
+  -H "X-Admin-API-Key: <admin_key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Repeated invalid outputs" }'
+```
+
+The body is optional; when supplied, `reason` is limited to 500 characters.
+
+**Response `200 OK`**
+```json
+{ "banned": true, "agent": { "id": "agent_research_01", "status": "offline", "bannedAt": "..." } }
+```
+
+**Response `404 Not Found`**
+```json
+{ "error": "AGENT_NOT_FOUND" }
+```
+
+#### `POST /api/admin/agents/:id/unban`
+
+Lifts a ban (idempotent). The agent stays offline until its next heartbeat.
+
+**Response `200 OK`**
+```json
+{ "banned": false, "agent": { "id": "agent_research_01", "bannedAt": null } }
+```
+
+---
+
+#### `GET /api/admin/logs`
+
+Returns the most recent `error`/`fatal` log entries from the in-memory ring
+buffer (max 200), newest first.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `limit` | `integer` | 1–500 entries (default `100`) |
+| `level` | `string` | Optional filter: `error` or `fatal` |
+
+**Request**
+```bash
+curl -s "http://localhost:3000/api/admin/logs?limit=50&level=error" \
+  -H "X-Admin-API-Key: <admin_key>"
+```
+
+**Response `200 OK`**
+```json
+{
+  "entries": [
+    {
+      "level": "error",
+      "message": "admin operation failed",
+      "timestamp": "2026-10-20T12:00:00.000Z",
+      "requestId": "req_123",
+      "traceId": "trace_abc",
+      "error": { "name": "Error", "message": "boom", "stack": "Error: boom..." }
+    }
+  ],
+  "total": 1
+}
+```
 
 ---
 

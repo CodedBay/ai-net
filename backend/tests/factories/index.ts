@@ -14,6 +14,11 @@
 
 import type { AgentRecord } from "../../src/db/agents";
 import type { PaymentRecord, PaymentStatus } from "../../src/db/index";
+import type { AgentTask } from "../../src/agents/base/BaseAgent";
+import type { TaskEvent } from "../../src/db/tasks";
+import type { AdminAuditEntry } from "../../src/services/adminControl";
+import { KNOWN_FLAGS, getAllFlags, type FeatureFlag } from "../../src/services/featureFlags";
+import type { QualityScore } from "../../src/services/qualityScorer.types";
 import type { Task, DAGNode, TaskStatus, NodeStatus } from "../../src/types/task";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,7 +73,7 @@ export interface WalletPair {
 export function makeWallet(n?: number): WalletPair {
   const seq = n ?? nextId();
   // Pad with zeros so the result is always exactly 56 chars.
-  const suffix = String(seq).padStart(49, "0");
+  const suffix = String(seq).padStart(42, "0");
   return {
     publicKey: `GTESTWALLETKEY${suffix}`,
     secretKey: `STESTWALLETKEY${suffix}`,
@@ -261,4 +266,287 @@ export function makePipelineDAG(n: number, nodeOverrides: Partial<DAGNode> = {})
 export function makePipelineTask(n: number, taskOverrides: Partial<Task> = {}): Task {
   const dag = makePipelineDAG(n);
   return makeTask({ dag, ...taskOverrides });
+}
+type Factory<T> = {
+  /** Return a fresh default value with optional top-level overrides. */
+  create(overrides?: Partial<T>): T;
+};
+
+function defineFactory<T>(defaults: () => T): Factory<T> {
+  return {
+    create(overrides = {}) {
+      return { ...defaults(), ...overrides };
+    },
+  };
+}
+
+/** Factory for registered backend agents. */
+export const agentFactory = defineFactory<AgentRecord>(() => ({
+  id: "agent_test_1",
+  capabilities: ["research"],
+  pricingXLM: 0.25,
+  endpoint: "http://127.0.0.1:4000",
+  stellarPublicKey: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+  reputationScore: 4.5,
+  lastSeenAt: "2026-01-01T00:00:00.000Z",
+  status: "online",
+}));
+
+/** Factory for persisted task records, including a valid empty DAG by default. */
+export const taskFactory = defineFactory<Task>(() => ({
+  id: "task_test_1",
+  prompt: "Research renewable energy market trends",
+  walletPublicKey: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+  status: "queued",
+  dag: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+}));
+
+/** Factory for the per-agent task payload consumed by backend agents. */
+export const subTaskFactory = defineFactory<AgentTask>(() => ({
+  taskId: "task_test_1",
+  nodeId: "node_test_1",
+  prompt: "Research renewable energy market trends",
+  context: "Test context",
+  upstreamResults: [],
+}));
+
+/** Factory for payment database records. */
+export const paymentFactory = defineFactory<PaymentRecord>(() => ({
+  taskId: "task_test_1",
+  nodeId: "node_test_1",
+  balanceId: "balance_test_1",
+  status: "locked",
+  amountStroops: 2_500_000n,
+  txHash: null,
+}));
+
+/** Factory for administrative audit log entries. */
+export const auditLogEntryFactory = defineFactory<AdminAuditEntry>(() => ({
+  at: "2026-01-01T00:00:00.000Z",
+  actor: "test-admin",
+  action: "test.action",
+  target: "task_test_1",
+  statusCode: 200,
+  requestId: "request_test_1",
+  details: { source: "test" },
+}));
+
+/** Test-only shape for outbound webhook delivery data; the backend has no persisted delivery model. */
+export interface WebhookDelivery {
+  id: string;
+  url: string;
+  event: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "delivered" | "failed";
+  attempts: number;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+/** Factory for webhook delivery fixtures used by tests. */
+export const webhookDeliveryFactory = defineFactory<WebhookDelivery>(() => ({
+  id: "webhook_delivery_test_1",
+  url: "https://example.test/webhooks/events",
+  event: "task.completed",
+  payload: { taskId: "task_test_1" },
+  status: "pending",
+  attempts: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  deliveredAt: null,
+}));
+
+/** Factory for scored agent outputs. */
+export const qualityScoreFactory = defineFactory<QualityScore>(() => ({
+  score: 85,
+  completeness: { score: 90, reason: "All required sections are present." },
+  relevance: { score: 85, reason: "The output addresses the task prompt." },
+  format: { score: 80, reason: "The output follows the requested format." },
+  needsReview: false,
+  reviewed: false,
+  timestamp: "2026-01-01T00:00:00.000Z",
+}));
+
+/** A snapshot entry returned by the feature-flag service. */
+export type FeatureFlagState = ReturnType<typeof getAllFlags>[FeatureFlag];
+
+/** Factory for feature-flag state snapshots returned by the backend service. */
+export const featureFlagFactory = {
+  create(
+    overrides: Partial<FeatureFlagState> & { flag?: FeatureFlag } = {},
+  ): FeatureFlagState {
+    const { flag = KNOWN_FLAGS[0], ...stateOverrides } = overrides;
+    return {
+      ...getAllFlags()[flag],
+      ...stateOverrides,
+    };
+  },
+};
+
+/** Factory for task event rows stored by the backend task database. */
+export const eventRecordFactory = defineFactory<TaskEvent>(() => ({
+  type: "node_completed",
+  taskId: "task_test_1",
+  nodeId: "node_test_1",
+  payload: { result: "completed" },
+  timestamp: "2026-01-01T00:00:00.000Z",
+}));
+
+export interface PipelineFixture {
+  coordinator: AgentRecord;
+  agents: AgentRecord[];
+  tasks: Task[];
+}
+
+/** Build a coordinator, the requested worker agents, and one assigned task per worker. */
+export function createPipeline(agentCount = 5): PipelineFixture {
+  if (!Number.isInteger(agentCount) || agentCount < 0) {
+    throw new RangeError("agentCount must be a non-negative integer");
+  }
+
+  const coordinator = agentFactory.create({
+    id: "coordinator_test_1",
+    capabilities: ["coordination"],
+  });
+  const agents = Array.from({ length: agentCount }, (_, index) =>
+    agentFactory.create({
+      id: `agent_test_${index + 1}`,
+      capabilities: [index % 2 === 0 ? "research" : "coding"],
+    }),
+  );
+  const tasks = agents.map((agent, index) => {
+    const node: DAGNode = {
+      nodeId: `node_test_${index + 1}`,
+      type: agent.capabilities[0],
+      dependencies: [],
+      status: "pending",
+    };
+    return taskFactory.create({
+      id: `task_test_${index + 1}`,
+      dag: [node],
+    });
+  });
+
+  return { coordinator, agents, tasks };
+}
+
+export type TaskStoreEventStatus = "Pending" | "Running" | "Completed" | "Failed";
+
+export interface OnChainTaskCreatedEvent {
+  version: 1;
+  task_id: string;
+  prompt_hash: string;
+  assigned_agents: string[];
+  created_at: number;
+  expires_at: number;
+}
+
+export interface OnChainTaskUpdatedEvent {
+  version: 1;
+  task_id: string;
+  agent: string;
+  old_status: TaskStoreEventStatus;
+  new_status: TaskStoreEventStatus;
+  updated_at: number;
+}
+
+export interface OnChainTaskFinalizedEvent {
+  version: 1;
+  task_id: string;
+  agent: string;
+  old_status: TaskStoreEventStatus;
+  final_status: "Completed" | "Failed";
+  finalized_at: number;
+}
+
+export interface OnChainOracleManagerSetEvent {
+  topics: ["task_str", "ora_set"];
+  data: string | null;
+}
+
+export interface OnChainTaskStoreUpgradedEvent {
+  topics: ["task_str", "upgraded"];
+  data: [oldVersion: string, newVersion: string, wasmHash: string, admin: string, ledgerSequence: number];
+}
+
+export type OnChainTaskStoreEvent =
+  | { topics: ["task_meta", "created"]; data: OnChainTaskCreatedEvent }
+  | { topics: ["task_meta", "updated"]; data: OnChainTaskUpdatedEvent }
+  | { topics: ["task_meta", "finalized"]; data: OnChainTaskFinalizedEvent }
+  | OnChainOracleManagerSetEvent
+  | OnChainTaskStoreUpgradedEvent;
+
+/** Create a task_store `created` contract event fixture. */
+export function createTaskCreatedEvent(
+  overrides: Partial<OnChainTaskCreatedEvent> = {},
+): Extract<OnChainTaskStoreEvent, { topics: ["task_meta", "created"] }> {
+  return {
+    topics: ["task_meta", "created"],
+    data: {
+      version: 1,
+      task_id: "a".repeat(64),
+      prompt_hash: "b".repeat(64),
+      assigned_agents: ["GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN"],
+      created_at: 1_735_689_600,
+      expires_at: 1_736_899_200,
+      ...overrides,
+    },
+  };
+}
+
+/** Create a task_store `updated` contract event fixture. */
+export function createTaskUpdatedEvent(
+  overrides: Partial<OnChainTaskUpdatedEvent> = {},
+): Extract<OnChainTaskStoreEvent, { topics: ["task_meta", "updated"] }> {
+  return {
+    topics: ["task_meta", "updated"],
+    data: {
+      version: 1,
+      task_id: "a".repeat(64),
+      agent: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+      old_status: "Pending",
+      new_status: "Running",
+      updated_at: 1_735_689_600,
+      ...overrides,
+    },
+  };
+}
+
+/** Create a task_store `finalized` contract event fixture. */
+export function createTaskFinalizedEvent(
+  overrides: Partial<OnChainTaskFinalizedEvent> = {},
+): Extract<OnChainTaskStoreEvent, { topics: ["task_meta", "finalized"] }> {
+  return {
+    topics: ["task_meta", "finalized"],
+    data: {
+      version: 1,
+      task_id: "a".repeat(64),
+      agent: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+      old_status: "Running",
+      final_status: "Completed",
+      finalized_at: 1_735_689_600,
+      ...overrides,
+    },
+  };
+}
+
+/** Create a task_store oracle-manager configuration event fixture. */
+export function createOracleManagerSetEvent(
+  address: string | null = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+): OnChainOracleManagerSetEvent {
+  return { topics: ["task_str", "ora_set"], data: address };
+}
+
+/** Create a task_store contract-upgrade event fixture. */
+export function createTaskStoreUpgradedEvent(
+  data: OnChainTaskStoreUpgradedEvent["data"] = [
+    "1.0.0",
+    "1.1.0",
+    "c".repeat(64),
+    "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN",
+    1,
+  ],
+): OnChainTaskStoreUpgradedEvent {
+  return { topics: ["task_str", "upgraded"], data };
 }

@@ -103,4 +103,38 @@ describe('NotificationBell Component', () => {
 
     expect(screen.queryByTestId('notification-panel')).not.toBeInTheDocument();
   });
+
+  test('exposes the dialog relationship and unread count on the bell button', async () => {
+    renderBellWithProvider(sampleNotifications);
+
+    const bellBtn = screen.getByTestId('notification-bell-btn');
+    expect(bellBtn).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(bellBtn).toHaveAttribute('aria-controls', 'notification-panel');
+    expect(bellBtn).toHaveAttribute('aria-label', 'Notifications, 2 unread');
+
+    await act(async () => {
+      fireEvent.click(bellBtn);
+    });
+
+    expect(screen.getByTestId('notification-panel')).toHaveAttribute('id', 'notification-panel');
+  });
+
+  test('caps the unread badge at 99+', () => {
+    const manyUnread: AppNotification[] = Array.from({ length: 105 }, (_, index) => ({
+      id: `many-unread-${index}`,
+      type: 'system',
+      title: `Notification ${index}`,
+      message: `Message ${index}`,
+      timestamp: new Date().toISOString(),
+      read: false,
+    }));
+
+    renderBellWithProvider(manyUnread);
+
+    expect(screen.getByTestId('notification-badge')).toHaveTextContent('99+');
+    expect(screen.getByTestId('notification-bell-btn')).toHaveAttribute(
+      'aria-label',
+      'Notifications, 105 unread'
+    );
+  });
 });

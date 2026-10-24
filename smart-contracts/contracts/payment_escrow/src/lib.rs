@@ -21,7 +21,7 @@
 //! automatically — the coordinator auth check is bypassed for expired escrows.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -38,11 +38,19 @@ pub enum DataKey {
     Escrow(Symbol, Symbol),
     /// Singleton coordinator address (authorized to release/refund).
     Coordinator,
+    /// Protocol treasury address receiving platform fees.
+    Treasury,
+    /// Platform config contract address (optional).
+    PlatformConfig,
+    /// Platform fee in basis points (1 bps = 0.01 %).
+    PlatformFeeBps,
+    /// Cumulative platform fees collected in stroops.
+    TotalFeesCollected,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
-#[contracttype]
+#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum Error {
@@ -58,12 +66,16 @@ pub enum Error {
     EscrowExpired = 5,
     /// Contract has not been initialized yet.
     NotInitialized = 6,
+    /// Treasury address has not been set.
+    TreasuryNotConfigured = 7,
+    /// Invalid fee basis points (must be <= 10_000).
+    InvalidFeeBps = 8,
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 #[contracttype]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EscrowStatus {
     Locked,
     Released,
@@ -71,7 +83,7 @@ pub enum EscrowStatus {
 }
 
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EscrowRecord {
     /// Amount locked (in stroops).
     pub amount: i128,
@@ -110,6 +122,17 @@ fn emit_refunded(env: &Env, task_id: &Symbol, node_id: &Symbol, amount: i128) {
     );
 }
 
+/// Event emitted when platform fee is collected on task payment release.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlatformFeeCollectedEvent {
+    pub task_id: Symbol,
+    pub agent_id: Address,
+    pub fee_amount: i128,
+    pub treasury_address: Address,
+    pub ledger: u32,
+}
+
 // ── Contract ──────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -126,6 +149,48 @@ impl PaymentEscrowContract {
         env.storage()
             .instance()
             .set(&DataKey::Coordinator, &coordinator);
+        Ok(())
+    }
+
+    /// Set the treasury address that receives platform fees (coordinator only).
+    pub fn set_treasury(env: Env, treasury: Address) -> Result<(), Error> {
+        let coordinator = Self::read_coordinator(&env)?;
+        coordinator.require_auth();
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+        Ok(())
+    }
+
+    /// Get configured treasury address.
+    pub fn get_treasury(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Treasury)
+    }
+
+    /// Set platform fee in basis points (1 bps = 0.01 %, e.g. 100 = 1%) (coordinator only).
+    pub fn set_platform_fee_bps(env: Env, fee_bps: u32) -> Result<(), Error> {
+        let coordinator = Self::read_coordinator(&env)?;
+        coordinator.require_auth();
+        if fee_bps > 10_000 {
+            return Err(Error::InvalidFeeBps);
+        }
+        env.storage().instance().set(&DataKey::PlatformFeeBps, &fee_bps);
+        Ok(())
+    }
+
+    /// Get configured platform fee in basis points.
+    pub fn get_platform_fee_bps(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::PlatformFeeBps).unwrap_or(0)
+    }
+
+    /// Get total platform fees collected in stroops.
+    pub fn get_total_fees_collected(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::TotalFeesCollected).unwrap_or(0)
+    }
+
+    /// Set platform config contract address (coordinator only).
+    pub fn set_platform_config(env: Env, platform_config: Address) -> Result<(), Error> {
+        let coordinator = Self::read_coordinator(&env)?;
+        coordinator.require_auth();
+        env.storage().instance().set(&DataKey::PlatformConfig, &platform_config);
         Ok(())
     }
 
@@ -190,9 +255,44 @@ impl PaymentEscrowContract {
             return Err(Error::EscrowExpired);
         }
 
+        let fee_bps = Self::get_platform_fee_bps(env.clone());
+        let fee_amount = if fee_bps > 0 {
+            (record.amount * fee_bps as i128) / 10_000
+        } else {
+            0
+        };
+
+        if fee_amount > 0 {
+            let treasury = env
+                .storage()
+                .instance()
+                .get::<_, Address>(&DataKey::Treasury)
+                .ok_or(Error::TreasuryNotConfigured)?;
+
+            let total_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalFeesCollected)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalFeesCollected, &(total_fees + fee_amount));
+
+            env.events().publish(
+                (Symbol::new(&env, "platform_fee_collected"),),
+                PlatformFeeCollectedEvent {
+                    task_id: task_id.clone(),
+                    agent_id: record.agent.clone(),
+                    fee_amount,
+                    treasury_address: treasury,
+                    ledger: env.ledger().sequence(),
+                },
+            );
+        }
+
         record.status = EscrowStatus::Released;
+        emit_released(&env, &task_id, &node_id, record.amount - fee_amount);
         env.storage().persistent().set(&key, &record);
-        emit_released(&env, &task_id, &node_id, record.amount);
         Ok(record)
     }
 

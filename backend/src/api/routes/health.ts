@@ -83,6 +83,41 @@ router.get("/", livenessHandler);
  */
 router.get("/live", livenessHandler);
 
+/**
+ * @openapi
+ * /health/deep:
+ *   get:
+ *     summary: Deep dependency health check
+ *     operationId: getDeepHealth
+ *     description: >
+ *       Probes external dependencies (Venice AI, Stellar Horizon) and reports
+ *       their individual status. Always returns 200 — dependency degradation
+ *       is reported in the body (`status: "degraded"`) rather than as an HTTP
+ *       failure, so diagnostic consumers can read full details. Readiness for
+ *       traffic lives on `/health/ready`.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Dependency status report (ok or degraded)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [status, services]
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [ok, degraded]
+ *                   example: degraded
+ *                 services:
+ *                   type: object
+ *                   properties:
+ *                     venice: { type: string, enum: [ok, error, unknown], example: error }
+ *                     horizon: { type: string, enum: [ok, error, unknown], example: ok }
+ *                 venice: { type: string, enum: [ok, error, unknown], example: error }
+ *                 horizon: { type: string, enum: [ok, error, unknown], example: ok }
+ */
 router.get("/deep", async (_req: Request, res: Response) => {
   const config = getConfig();
   const [veniceStatus, horizonStatus] = await Promise.all([
@@ -91,7 +126,10 @@ router.get("/deep", async (_req: Request, res: Response) => {
   ]);
 
   const allOk = veniceStatus === "ok" && horizonStatus === "ok";
-  res.status(allOk ? 200 : 503).json({
+  // Deep health is a diagnostic report, not a readiness gate: always 200 so
+  // degraded dependencies surface in the body (`status: "degraded"`) without
+  // being treated as an outage. Readiness lives on /health/ready.
+  res.status(200).json({
     status: allOk ? "ok" : "degraded",
     services: {
       venice: veniceStatus,
@@ -102,6 +140,32 @@ router.get("/deep", async (_req: Request, res: Response) => {
   });
 });
 
+/**
+ * @openapi
+ * /health/ready:
+ *   get:
+ *     summary: Readiness probe
+ *     operationId: getReady
+ *     description: >
+ *       Returns 200 when every dependency check passes (task DB, payment DB,
+ *       queue, Venice AI, Horizon, WebSocket server) and 500 otherwise, so
+ *       orchestrators can gate traffic on readiness.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: All dependencies ready
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessStatus'
+ *       500:
+ *         description: One or more dependencies failing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessStatus'
+ */
 router.get("/ready", async (_req: Request, res: Response) => {
   const checks: Record<string, "ok" | "error" | "unknown"> = {
     tasks: "ok",

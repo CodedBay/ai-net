@@ -258,3 +258,9 @@
   line-height: 1.4;
   margin: 0;
 }
+
+.estimateLoading {
+  font-size: 0.78rem;
+  color: var(--text-muted, var(--text-secondary));
+  margin: 0 0 8px;
+}

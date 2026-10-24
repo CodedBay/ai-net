@@ -4,12 +4,15 @@ import type { Server as HttpServer } from 'http';
 import { createApp } from '../../backend/src/api/app';
 import type { DispatchFn, PaymentReleaseFn } from '../../backend/src/coordinator/coordinator';
 import type { AgentResult } from '../../backend/src/agents/research/types';
+import { Keypair } from '@stellar/stellar-sdk';
 import { MOCK_CONTRACT_IDS, onChainContracts, createE2ETestKeypair, signChallenge } from './helpers';
 
 process.env.NODE_ENV = 'test';
 process.env.SKIP_STELLAR_ACCOUNT_VERIFY = 'true';
 process.env.REGISTRY_CONTRACT_ID = MOCK_CONTRACT_IDS.REGISTRY;
 process.env.ERROR_RESOLVER_CONTRACT_ID = MOCK_CONTRACT_IDS.ERROR_RESOLVER;
+
+const TEST_WALLET = Keypair.random().publicKey();
 
 const dispatchedAgents: Array<{ taskId: string; nodeType: string }> = [];
 
@@ -91,8 +94,8 @@ describe('Agent Lifecycle E2E', () => {
     // 5. Submit a task requiring the agent's capability
     const taskRes = await request
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETPUBLICKEY')
-      .send({ prompt: 'Research solar energy market in SEA', walletPublicKey: 'GFAKEWALLETPUBLICKEY' })
+      .set('walletpublickey', TEST_WALLET)
+      .send({ prompt: 'Research solar energy market in SEA', walletPublicKey: TEST_WALLET })
       .expect(201);
     const taskId = taskRes.body.taskId as string;
 
@@ -102,7 +105,7 @@ describe('Agent Lifecycle E2E', () => {
       await new Promise(r => setTimeout(r, 200));
       const getRes = await request
         .get(`/api/tasks/${taskId}`)
-        .set('walletpublickey', 'GFAKEWALLETPUBLICKEY');
+        .set('walletpublickey', TEST_WALLET);
       status = getRes.body.status as string;
       if (status === 'completed' || status === 'failed') break;
     }

@@ -115,11 +115,79 @@ export function formatTime(
 
 /**
  * Grouped number formatting.
- *
- * Deliberately not used for XLM amounts: Stellar balances are fixed-precision
- * (7 decimals) and grouping or rounding them would be wrong for the domain.
  */
 export function formatNumber(value: number, locale: string, options?: Intl.NumberFormatOptions): string {
   if (!Number.isFinite(value)) return String(value)
   return getNumberFormatter(locale, options).format(value)
+}
+
+// ---------------------------------------------------------------------------
+// XLM-specific formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Stellar minimum base reserve in XLM. Each account must maintain at least
+ * 1 base reserve (1 XLM) plus 0.5 XLM per subentry (trustline, offer, etc.).
+ * We default to 1 XLM base reserve when the caller does not pass subentries.
+ */
+export const XLM_BASE_RESERVE = 1
+
+/**
+ * Format an XLM amount with locale-aware thousands separators.
+ *
+ * - Uses up to 7 decimal places (Stellar's fixed precision).
+ * - Trailing zeros are stripped (e.g. 10.5000000 → "10.5 XLM").
+ * - Returns a string like "123,456.7891234 XLM".
+ *
+ * @param rawBalance  Raw balance string from Horizon (e.g. "123456.7891234")
+ * @param locale      BCP-47 locale tag from `useTranslation()` / `i18n.language`
+ * @returns           Formatted string without the "XLM" suffix (suffix added by
+ *                    the component for accessibility reasons)
+ */
+export function formatXLM(rawBalance: string, locale: string): string {
+  const num = parseFloat(rawBalance)
+  if (!Number.isFinite(num)) return rawBalance
+
+  // Intl.NumberFormat with up to 7 fraction digits and trailing-zero stripping
+  return getNumberFormatter(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 7,
+  }).format(num)
+}
+
+/**
+ * Compute the spendable (available) XLM balance after subtracting the minimum
+ * account reserve.
+ *
+ * Formula: available = balance - (1 + 0.5 * subentryCount) XLM
+ *
+ * @param rawBalance    Raw balance string from Horizon
+ * @param subentryCount Number of subentries (trustlines, offers, signers)
+ *                      Defaults to 0.
+ * @returns             Available balance in XLM as a number; never negative.
+ */
+export function computeAvailableBalance(
+  rawBalance: string,
+  subentryCount = 0,
+): number {
+  const total = parseFloat(rawBalance)
+  if (!Number.isFinite(total)) return 0
+  const reserve = XLM_BASE_RESERVE + 0.5 * subentryCount
+  return Math.max(0, total - reserve)
+}
+
+/**
+ * Format the available (spendable) XLM balance with locale-aware formatting.
+ *
+ * @param rawBalance    Raw balance string from Horizon
+ * @param locale        BCP-47 locale tag
+ * @param subentryCount Number of subentries for reserve calculation
+ */
+export function formatAvailableXLM(
+  rawBalance: string,
+  locale: string,
+  subentryCount = 0,
+): string {
+  const available = computeAvailableBalance(rawBalance, subentryCount)
+  return formatXLM(available.toString(), locale)
 }

@@ -55,6 +55,16 @@ pub struct UpgradeRolledBackEvent {
     pub admin: Address,
 }
 
+/// Event emitted on rollback execution with contract ID and ledger (Issue #418)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RollbackExecutedEvent {
+    pub contract_id: Address,
+    pub from_version: String,
+    pub to_version: String,
+    pub ledger: u32,
+}
+
 /// Event emitted during migration progress
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

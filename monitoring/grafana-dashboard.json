@@ -760,6 +760,40 @@
         },
         "overrides": []
       }
+    },
+    {
+      "title": "Database Connection Pools",
+      "type": "timeseries",
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 42 },
+      "targets": [
+        {
+          "expr": "db_pool_active_connections",
+          "legendFormat": "{{database}} active",
+          "refId": "A"
+        },
+        {
+          "expr": "db_pool_idle_connections",
+          "legendFormat": "{{database}} idle",
+          "refId": "B"
+        },
+        {
+          "expr": "db_pool_waiting_queue_size",
+          "legendFormat": "{{database}} waiting",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "30s",

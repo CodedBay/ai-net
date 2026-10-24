@@ -1,20 +1,68 @@
 .wrapper {
+  position: relative;
   width: 100%;
   border-radius: 0.75rem;
   border: 1px solid color-mix(in srgb, var(--text-muted) 20%, transparent);
   background: color-mix(in srgb, var(--surface-black) 65%, transparent);
   overflow: hidden;
+  isolation: isolate;
+}
+
+.wrapper::before,
+.wrapper::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 1.25rem;
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.wrapper::before {
+  left: 0;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.55), transparent);
+}
+
+.wrapper::after {
+  right: 0;
+  background: linear-gradient(270deg, rgba(15, 23, 42, 0.65), transparent);
+}
+
+.wrapper[data-scroll-left='true']::before,
+.wrapper[data-scroll-right='true']::after {
+  opacity: 1;
 }
 
 .viewport {
   width: 100%;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
+}
+
+.table th,
+.table td {
+  min-width: 8rem;
+}
+
+.table .primaryColumn {
+  min-width: 9rem;
+}
+
+.table .hiddenMobileColumn {
+  min-width: 6rem;
 }
 
 .stickyHeader th {
@@ -98,4 +146,71 @@
   border-top: 1px solid color-mix(in srgb, var(--text-muted) 12%, transparent);
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  .wrapper[data-overflowing='true']::after {
+    opacity: 1;
+  }
+
+  .viewport {
+    scrollbar-width: thin;
+  }
+
+  .table .hiddenMobileColumn {
+    display: none;
+  }
+
+  .mobileCards {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mobileCards thead {
+    display: none;
+  }
+
+  .mobileCards tbody {
+    display: grid;
+    gap: 0.625rem;
+    padding: 0.625rem;
+  }
+
+  .mobileCards .row {
+    display: grid;
+    min-width: 0;
+    padding: 0.5rem;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 0.5rem;
+  }
+
+  .mobileCards .row > td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: auto;
+    min-width: 0;
+    padding: 0.4rem 0.25rem;
+    border: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .mobileCards .row > td::before {
+    flex: 0 0 auto;
+    color: #cbd5e1;
+    content: attr(data-label);
+    font-size: 0.75rem;
+    text-align: left;
+  }
+
+  .mobileCards .row > .selectionCell {
+    justify-content: flex-end;
+  }
+
+  .mobileCards .row > .selectionCell::before {
+    content: none;
+  }
 }

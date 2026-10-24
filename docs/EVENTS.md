@@ -350,6 +350,21 @@ interface AgentStatusPayload {
 
 **Frontend state change:** Agent card status dot changes colour (green = online, grey = offline). Agent count badge in nav updates.
 
+**Connection snapshot:** Immediately after the WebSocket handshake the server sends a synthetic `agents:snapshot` event so clients can hydrate without a REST call:
+
+```typescript
+interface AgentsSnapshotPayload {
+  agents: Array<{
+    id: string;
+    capabilities: string[];
+    status: "online" | "offline";
+    lastSeenAt: string;     // ISO-8601
+  }>;
+}
+```
+
+The server sends `{"type":"ping"}` heartbeats every 30 s; clients must reply with `{"type":"pong"}` or the connection is closed after the pong timeout. Concurrent connections are capped per client IP (`WS_MAX_CONNECTIONS_PER_CLIENT`, default 5).
+
 ---
 
 ### 4.2 task:update

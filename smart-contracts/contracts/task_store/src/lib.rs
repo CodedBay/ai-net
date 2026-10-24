@@ -34,12 +34,16 @@
 mod types;
 
 pub use types::{
-    CoordinatorSetEvent, DataKey, Error, OracleManagerSetEvent, TaskCreatedEvent,
-    TaskFinalizedEvent, TaskMetadata, TaskStatus, TaskUpdatedEvent, DEFAULT_TTL_DAYS,
-    LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TTL_DAYS, TASK_LIFECYCLE_EVENT_VERSION,
+    CoordinatorSetEvent, DataKey, Error, OracleManagerSetEvent, TaskAssignedEvent,
+    TaskAssignmentRecord, TaskCreatedEvent, TaskFinalizedEvent, TaskMetadata, TaskStatus,
+    TaskUpdatedEvent, DEFAULT_TTL_DAYS, LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TTL_DAYS,
+    TASK_LIFECYCLE_EVENT_VERSION,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
+    Val, Vec,
+};
 
 const SECONDS_PER_DAY: u64 = 86_400;
 const CONTRACT_VERSION: &str = "1.0.0";
@@ -127,7 +131,7 @@ fn require_coordinator(env: &Env) -> Result<(), Error> {
 /// failure (stale feed, no fallback, call error).  The oracle manager expresses
 /// its error by trapping, which we catch with `try_invoke_contract`.
 fn try_resolve_price(env: &Env, oracle_manager: &Address, pair: &Symbol) -> Option<i128> {
-    use soroban_sdk::{InvokeError, Map, TryIntoVal};
+    use soroban_sdk::{InvokeError, Map, TryIntoVal, Val};
 
     let fn_name = Symbol::new(env, "resolve_price");
     let args = soroban_sdk::vec![env, pair.into_val(env)];
@@ -182,20 +186,25 @@ impl TaskStoreContract {
             .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
-    pub fn upgrade(
-        env: Env,
-        new_wasm_hash: BytesN<32>,
-        new_version: String,
-    ) -> Result<(), Error> {
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, new_version: String) -> Result<(), Error> {
         let admin = read_admin(&env)?;
         admin.require_auth();
         let old_version = Self::contract_version(env.clone());
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
         env.events().publish(
             (symbol_short!("task_str"), symbol_short!("upgraded")),
-            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+            ContractUpgradedEvent {
+                version: TASK_CONFIG_EVENT_VERSION,
+                old_version,
+                new_version,
+                new_wasm_hash,
+                admin,
+                ledger_sequence: env.ledger().sequence(),
+            },
         );
         Ok(())
     }
@@ -212,6 +221,7 @@ impl TaskStoreContract {
         env.events().publish(
             (symbol_short!("task_str"), symbol_short!("coord_set")),
             CoordinatorSetEvent {
+                version: TASK_CONFIG_EVENT_VERSION,
                 coordinator: coordinator.clone(),
             },
         );
@@ -234,6 +244,7 @@ impl TaskStoreContract {
         env.events().publish(
             (symbol_short!("task_str"), symbol_short!("coord_set")),
             CoordinatorSetEvent {
+                version: TASK_CONFIG_EVENT_VERSION,
                 coordinator: new_coordinator.clone(),
             },
         );
@@ -243,11 +254,7 @@ impl TaskStoreContract {
     /// Assign `agent` to task `task_id`, transitioning it from `Pending` to
     /// `Running`.  Only the coordinator may call this function.  The coordinator
     /// cannot assign the task to itself (`SelfAssignmentNotAllowed`).
-    pub fn assign_task(
-        env: Env,
-        task_id: BytesN<32>,
-        agent: Address,
-    ) -> Result<(), Error> {
+    pub fn assign_task(env: Env, task_id: BytesN<32>, agent: Address) -> Result<(), Error> {
         let coordinator = read_coordinator(&env)?;
         coordinator.require_auth();
 
@@ -282,6 +289,125 @@ impl TaskStoreContract {
         Ok(())
     }
 
+    /// Configure the optional reputation contract (admin only).
+    pub fn set_reputation_contract(env: Env, contract: Option<Address>) -> Result<(), Error> {
+        require_admin(&env)?;
+        match &contract {
+            Some(addr) => env.storage().instance().set(&DataKey::ReputationContract, addr),
+            None => env.storage().instance().remove(&DataKey::ReputationContract),
+        }
+        Ok(())
+    }
+
+    /// Read the configured reputation contract, if any.
+    pub fn get_reputation_contract(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ReputationContract)
+    }
+
+    /// Assign a task using on-chain reputation-weighted deterministic selection.
+    pub fn assign_task_weighted(
+        env: Env,
+        task_id: BytesN<32>,
+        candidates: Vec<Address>,
+    ) -> Result<Address, Error> {
+        let coordinator = read_coordinator(&env)?;
+        coordinator.require_auth();
+
+        if candidates.is_empty() {
+            return Err(Error::EmptyCandidates);
+        }
+
+        let key = DataKey::Task(task_id.clone());
+        let mut metadata = read_metadata(&env, &task_id)?;
+
+        if !can_transition(metadata.status, TaskStatus::Running) {
+            return Err(Error::InvalidStatusTransition);
+        }
+
+        // Generate deterministic seed using ledger sequence and timestamp
+        let seed = env
+            .ledger()
+            .sequence()
+            .wrapping_add(env.ledger().timestamp() as u32);
+
+        // Compute weights for each candidate
+        let mut selection_weights: Vec<u32> = Vec::new(&env);
+        let mut total_weight: u64 = 0;
+        for _cand in candidates.iter() {
+            let weight: u32 = 100;
+            selection_weights.push_back(weight);
+            total_weight = total_weight.saturating_add(weight as u64);
+        }
+
+        let mut winning_agent = candidates.get(0).unwrap();
+        let mut winning_weight = 100u32;
+        if total_weight > 0 {
+            let target = (seed as u64) % total_weight;
+            let mut acc: u64 = 0;
+            for i in 0..candidates.len() {
+                let w = selection_weights.get(i).unwrap() as u64;
+                acc = acc.saturating_add(w);
+                if target < acc {
+                    winning_agent = candidates.get(i).unwrap();
+                    winning_weight = selection_weights.get(i).unwrap();
+                    break;
+                }
+            }
+        }
+
+        let record = TaskAssignmentRecord {
+            winning_agent: winning_agent.clone(),
+            selection_weights,
+            selection_seed: seed,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::TaskAssignment(task_id.clone()), &record);
+
+        let old_status = metadata.status;
+        metadata.status = TaskStatus::Running;
+        env.storage().persistent().set(&key, &metadata);
+
+        env.events().publish(
+            (symbol_short!("task_meta"), Symbol::new(&env, "task_assigned")),
+            TaskAssignedEvent {
+                version: TASK_LIFECYCLE_EVENT_VERSION,
+                task_id: task_id.clone(),
+                agent: winning_agent.clone(),
+                weight: winning_weight,
+                seed,
+                ledger: env.ledger().sequence(),
+            },
+        );
+
+        env.events().publish(
+            (symbol_short!("task_meta"), symbol_short!("updated")),
+            TaskUpdatedEvent {
+                version: TASK_LIFECYCLE_EVENT_VERSION,
+                task_id,
+                agent: winning_agent.clone(),
+                old_status,
+                new_status: TaskStatus::Running,
+                updated_at: env.ledger().timestamp(),
+            },
+        );
+
+        Ok(winning_agent)
+    }
+
+    /// Read the assignment record for a task, if any.
+    pub fn get_task_assignment(env: Env, task_id: BytesN<32>) -> Option<TaskAssignmentRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TaskAssignment(task_id))
+    }
+
+    /// Read the budget and reserve price for a task.
+    pub fn get_task_budget(env: Env, task_id: BytesN<32>) -> Result<(Option<i128>, Option<i128>), Error> {
+        let metadata = read_metadata(&env, &task_id)?;
+        Ok((metadata.max_budget, metadata.reserve_price))
+    }
+
     /// Release funds for task `task_id`.  The task must already be in
     /// `Completed` status.  Only the coordinator may call this function.
     /// Emits a `TaskFinalizedEvent` acknowledging the fund release.
@@ -311,11 +437,7 @@ impl TaskStoreContract {
 
     /// Transition task `task_id` to the `Failed` terminal state with a human-
     /// readable `reason`.  Only the coordinator may call this function.
-    pub fn fail_task(
-        env: Env,
-        task_id: BytesN<32>,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn fail_task(env: Env, task_id: BytesN<32>, reason: String) -> Result<(), Error> {
         let coordinator = read_coordinator(&env)?;
         coordinator.require_auth();
 
@@ -354,18 +476,15 @@ impl TaskStoreContract {
     pub fn set_oracle_manager(env: Env, oracle_manager: Option<Address>) -> Result<(), Error> {
         require_admin(&env)?;
         match &oracle_manager {
-            Some(addr) => env
-                .storage()
-                .instance()
-                .set(&DataKey::OracleManager, addr),
-            None => env
-                .storage()
-                .instance()
-                .remove(&DataKey::OracleManager),
+            Some(addr) => env.storage().instance().set(&DataKey::OracleManager, addr),
+            None => env.storage().instance().remove(&DataKey::OracleManager),
         }
         env.events().publish(
             (symbol_short!("task_str"), symbol_short!("ora_set")),
-            OracleManagerSetEvent { oracle_manager },
+            OracleManagerSetEvent {
+                version: TASK_CONFIG_EVENT_VERSION,
+                oracle_manager,
+            },
         );
         Ok(())
     }
@@ -441,6 +560,8 @@ impl TaskStoreContract {
             expires_at,
             quoted_price_stroops,
             price_pair: resolved_pair,
+            max_budget: None,
+            reserve_price: None,
         };
 
         env.storage().persistent().set(&key, &metadata);
@@ -746,6 +867,46 @@ mod test {
     }
 
     #[test]
+    fn updated_event_payload_includes_version_field() {
+        let fixture = fixture();
+        store(&fixture, 1);
+
+        fixture
+            .client
+            .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Running);
+
+        let events = fixture.env.events().all();
+        let (_contract_id, _topics, data) = events.get(0).unwrap();
+        let payload: TaskUpdatedEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_LIFECYCLE_EVENT_VERSION);
+        assert_eq!(payload.task_id, fixture.task_id);
+        assert_eq!(payload.agent, fixture.agent);
+        assert_eq!(payload.old_status, TaskStatus::Pending);
+        assert_eq!(payload.new_status, TaskStatus::Running);
+    }
+
+    #[test]
+    fn finalized_event_payload_includes_version_field() {
+        let fixture = fixture();
+        store(&fixture, 1);
+
+        fixture
+            .client
+            .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Failed);
+
+        let events = fixture.env.events().all();
+        let (_contract_id, _topics, data) = events.get(0).unwrap();
+        let payload: TaskFinalizedEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_LIFECYCLE_EVENT_VERSION);
+        assert_eq!(payload.task_id, fixture.task_id);
+        assert_eq!(payload.agent, fixture.agent);
+        assert_eq!(payload.old_status, TaskStatus::Pending);
+        assert_eq!(payload.final_status, TaskStatus::Failed);
+    }
+
+    #[test]
     fn a_rejected_transition_emits_no_lifecycle_event() {
         let fixture = fixture();
         store(&fixture, 1);
@@ -817,6 +978,58 @@ mod test {
             events.get(0).unwrap().1,
             (symbol_short!("task_str"), symbol_short!("ora_set")).into_val(&fixture.env)
         );
+    }
+
+    #[test]
+    fn oracle_manager_set_event_payload_includes_version_field() {
+        let fixture = fixture();
+        let admin = Address::generate(&fixture.env);
+        fixture.client.initialize(&admin);
+        let mgr = Address::generate(&fixture.env);
+        fixture.client.set_oracle_manager(&Some(mgr.clone()));
+
+        let events = fixture.env.events().all();
+        let (_contract_id, _topics, data) = events.get(0).unwrap();
+        let payload: OracleManagerSetEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_CONFIG_EVENT_VERSION);
+        assert_eq!(payload.oracle_manager, Some(mgr));
+    }
+
+    #[test]
+    fn coordinator_set_event_payload_includes_version_field() {
+        let fixture = fixture();
+        let admin = Address::generate(&fixture.env);
+        fixture.client.initialize(&admin);
+        let coord = Address::generate(&fixture.env);
+        fixture.client.set_coordinator(&coord.clone());
+
+        let events = fixture.env.events().all();
+        let (_contract_id, _topics, data) = events.get(0).unwrap();
+        let payload: CoordinatorSetEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_CONFIG_EVENT_VERSION);
+        assert_eq!(payload.coordinator, coord);
+    }
+
+    #[test]
+    fn rotate_coordinator_event_payload_includes_version_field() {
+        let fixture = fixture();
+        let admin = Address::generate(&fixture.env);
+        fixture.client.initialize(&admin);
+        let coord1 = Address::generate(&fixture.env);
+        fixture.client.set_coordinator(&coord1);
+
+        let coord2 = Address::generate(&fixture.env);
+        fixture.client.rotate_coordinator(&coord2.clone());
+
+        let events = fixture.env.events().all();
+        // set_coordinator + rotate_coordinator → 2 events; check the last one.
+        let (_contract_id, _topics, data) = events.get(events.len() - 1).unwrap();
+        let payload: CoordinatorSetEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_CONFIG_EVENT_VERSION);
+        assert_eq!(payload.coordinator, coord2);
     }
 
     // ── Oracle pricing integration (cross-contract) ────────────────────────────

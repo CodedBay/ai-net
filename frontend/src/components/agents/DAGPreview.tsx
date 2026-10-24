@@ -8,7 +8,6 @@ import ReactFlow, {
   ConnectionLineType,
   Edge,
   MarkerType,
-  MiniMapNodeProps,
   Node,
   NodeProps,
   Position,
@@ -192,9 +191,8 @@ function FitViewButton() {
 
 // ─── MiniMap node coloring ──────────────────────────────────────────────────
 
-function miniMapNodeColor(node: MiniMapNodeProps): string {
-  const data = node.data as PreviewNodeData | undefined;
-  return capabilityColor(data?.capability ?? data?.label);
+function miniMapNodeColor(node: Node<PreviewNodeData>): string {
+  return capabilityColor(node.data.capability ?? node.data.label);
 }
 
 // ─── Main component (needs Provider for useReactFlow) ───────────────────────

@@ -17,7 +17,7 @@ function parseTraceparent(header: string): { traceId: string; parentSpanId: stri
   const [version, traceId, parentSpanId, _flags] = parts;
   if (version !== '00') return undefined;
   if (!/^[0-9a-f]{32}$/.test(traceId)) return undefined;
-  if (!/^[0-9a-f]{32}$/.test(parentSpanId)) return undefined;
+  if (!/^[0-9a-f]{16}$/.test(parentSpanId)) return undefined;
   return { traceId, parentSpanId };
 }
 
@@ -97,7 +97,8 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
     traceId,
     'backend',
     'http_request',
-    { method: req.method, path: req.path, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) }
+    { method: req.method, path: req.path, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) },
+    parentSpanId,
   );
 
   if (typeof res.on === "function") {

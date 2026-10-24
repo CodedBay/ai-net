@@ -116,6 +116,12 @@ List endpoints support standardized query parameters:
           bearerFormat: "JWT",
           description: "JSON Web Token for authenticated user sessions",
         },
+        AdminApiKey: {
+          type: "apiKey",
+          in: "header",
+          name: "X-Admin-API-Key",
+          description: "Administrative API key for protected operations",
+        },
       },
       headers: {
         "X-RateLimit-Limit": {
@@ -181,8 +187,7 @@ List endpoints support standardized query parameters:
               example: { summary: "Liquidity increased by 14% week-over-week." },
             },
             error: {
-              type: "string",
-              nullable: true,
+              type: ["string", "null"],
               example: null,
               description: "Error message if the node execution failed.",
             },
@@ -295,11 +300,10 @@ List endpoints support standardized query parameters:
         },
         AgentHeartbeatResponse: {
           type: "object",
-          required: ["status", "agentId", "timestamp"],
+          required: ["status", "lastSeenAt"],
           properties: {
             status: { type: "string", example: "ok" },
-            agentId: { type: "string", example: "agent_crypto_analyst_01" },
-            timestamp: { type: "string", format: "date-time", example: "2026-08-25T17:30:00.000Z" },
+            lastSeenAt: { type: "string", format: "date-time", example: "2026-08-25T17:30:00.000Z" },
           },
         },
         HealthStatus: {
@@ -385,10 +389,10 @@ List endpoints support standardized query parameters:
             priority: { $ref: "#/components/schemas/JobPriority" },
             attempts: { type: "integer", example: 1 },
             maxAttempts: { type: "integer", example: 3 },
-            nextRunAt: { type: "string", format: "date-time", nullable: true },
-            lockedAt: { type: "string", format: "date-time", nullable: true },
-            lockedBy: { type: "string", nullable: true },
-            error: { type: "string", nullable: true },
+            nextRunAt: { type: ["string", "null"], format: "date-time" },
+            lockedAt: { type: ["string", "null"], format: "date-time" },
+            lockedBy: { type: ["string", "null"] },
+            error: { type: ["string", "null"] },
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
           },
@@ -463,14 +467,32 @@ List endpoints support standardized query parameters:
             timestamp: { type: "string", format: "date-time", example: "2026-08-25T17:01:00.000Z" },
           },
         },
+        ErrorPayload: {
+          description:
+            "Error detail. Structured handlers emit an object with message, code, correlationId and details; some legacy handlers emit a plain string message.",
+          oneOf: [
+            { type: "string", example: "Task not found" },
+            {
+              type: "object",
+              required: ["message"],
+              properties: {
+                message: { type: "string", example: "Task not found: task_123" },
+                code: { type: "string", example: "NOT_FOUND" },
+                correlationId: {
+                  type: "string",
+                  example: "3d00cb11-fa1b-4449-89ab-65278761da51",
+                },
+                details: { type: "object" },
+                timestamp: { type: "string", format: "date-time" },
+              },
+            },
+          ],
+        },
         ErrorResponse: {
           type: "object",
           required: ["error"],
           properties: {
-            error: {
-              type: "string",
-              example: "Invalid request payload or parameters",
-            },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
             code: {
               type: "string",
               example: "INVALID_REQUEST",
@@ -479,6 +501,95 @@ List endpoints support standardized query parameters:
               type: "object",
               description: "Optional structured validation errors or error context",
             },
+          },
+        },
+        Error: {
+          type: "object",
+          properties: {
+            error: {
+              oneOf: [
+                { type: "string" },
+                {
+                  type: "object",
+                  properties: {
+                    message: { type: "string" },
+                    code: { type: "string" },
+                  },
+                  additionalProperties: true,
+                },
+              ],
+            },
+            message: { type: "string" },
+            code: { type: "string" },
+          },
+          additionalProperties: true,
+        },
+        PaymentRecord: {
+          type: "object",
+          required: ["taskId", "nodeId", "balanceId", "status", "amountStroops", "txHash"],
+          properties: {
+            taskId: { type: "string" },
+            nodeId: { type: "string" },
+            balanceId: { type: "string" },
+            status: { type: "string", enum: ["locked", "released", "refunded"] },
+            amountStroops: { type: "string", pattern: "^[0-9]+$" },
+            txHash: { type: ["string", "null"] },
+          },
+        },
+        ReconciliationReport: {
+          type: "object",
+          required: ["id", "runAt", "triggeredBy", "status", "summary", "discrepancies"],
+          properties: {
+            id: { type: "string" },
+            runAt: { type: "string", format: "date-time" },
+            triggeredBy: { type: "string", enum: ["manual", "scheduled", "release"] },
+            status: { type: "string", enum: ["consistent", "discrepancies_found"] },
+            summary: {
+              type: "object",
+              required: ["totalLocalRecords", "totalOnChainBalances", "matched", "discrepancies", "missingOnChain", "missingLocal", "amountMismatch"],
+              properties: {
+                totalLocalRecords: { type: "integer" },
+                totalOnChainBalances: { type: "integer" },
+                matched: { type: "integer" },
+                discrepancies: { type: "integer" },
+                missingOnChain: { type: "integer" },
+                missingLocal: { type: "integer" },
+                amountMismatch: { type: "integer" },
+              },
+            },
+            discrepancies: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["type", "balanceId", "severity", "description"],
+                properties: {
+                  type: { type: "string", enum: ["missing_on_chain", "missing_local", "amount_mismatch"] },
+                  balanceId: { type: "string" },
+                  taskId: { type: "string" },
+                  nodeId: { type: "string" },
+                  severity: { type: "string", enum: ["info", "warning", "critical"] },
+                  description: { type: "string" },
+                  localAmountStroops: { type: "string" },
+                  onChainAmountStroops: { type: "string" },
+                  expectedAmountStroops: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        ContractEvent: {
+          type: "object",
+          required: ["contractId", "eventType", "version", "payload", "ledgerSeq", "txHash", "occurredAt", "indexedAt"],
+          properties: {
+            id: { type: "integer" },
+            contractId: { type: "string" },
+            eventType: { type: "string" },
+            version: { type: "integer" },
+            payload: { type: "string" },
+            ledgerSeq: { type: "integer" },
+            txHash: { type: "string" },
+            occurredAt: { type: "string", format: "date-time" },
+            indexedAt: { type: "string", format: "date-time" },
           },
         },
         ValidationError: {
@@ -502,28 +613,28 @@ List endpoints support standardized query parameters:
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "Missing or invalid walletpublickey authentication header" },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
           },
         },
         ForbiddenError: {
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "You do not have permission to access or modify this resource" },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
           },
         },
         NotFoundError: {
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "Task not found" },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
           },
         },
         RateLimitError: {
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "Too many requests. Please try again later." },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
             retryAfter: { type: "integer", example: 60 },
           },
         },
@@ -531,14 +642,14 @@ List endpoints support standardized query parameters:
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "An unexpected internal server error occurred" },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
           },
         },
         ServiceUnavailableError: {
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string", example: "Service dependencies are unavailable" },
+            error: { $ref: '#/components/schemas/ErrorPayload' },
           },
         },
         AuthTokensResponse: {
@@ -556,7 +667,7 @@ List endpoints support standardized query parameters:
                 id: { type: "string", example: "sess_uuid" },
                 familyId: { type: "string", example: "fam_uuid" },
                 deviceId: { type: "string", example: "device_macbook_pro" },
-                deviceName: { type: "string", nullable: true, example: "Chrome on macOS" },
+                deviceName: { type: ["string", "null"], example: "Chrome on macOS" },
                 expiresAt: { type: "string", example: "2026-09-05T12:00:00.000Z" },
               },
             },

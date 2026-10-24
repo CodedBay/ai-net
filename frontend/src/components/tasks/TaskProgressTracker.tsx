@@ -466,8 +466,6 @@ export const TaskProgressTracker: React.FC<TaskProgressTrackerProps> = ({
     try {
       await apiClient.delete(`/api/tasks/${taskId}`);
       setTask((prev) => (prev ? { ...prev, status: 'failed' } : prev));
-      // Compute refund = budget - completed costs
-      const completedCost = computeTotalCost(steps);
       // We don't know the original budget here; show completed cost as spent
       setCancelledRefund(0); // placeholder — backend determines actual refund
       setShowCancelModal(false);
@@ -476,7 +474,7 @@ export const TaskProgressTracker: React.FC<TaskProgressTrackerProps> = ({
       // Show error in modal
       setIsCancelling(false);
     }
-  }, [taskId, steps, onCancelled]);
+  }, [taskId, onCancelled]);
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
@@ -614,7 +612,7 @@ export const TaskProgressTracker: React.FC<TaskProgressTrackerProps> = ({
             <strong>{totalCost.toFixed(2)} XLM</strong>
           </div>
           {/* Display output from last completed step */}
-          {steps.at(-1)?.output && (
+          {steps.at(-1)?.output != null && (
             <div className={styles.outputPanel}>
               <h3 className={styles.outputTitle}>Result</h3>
               <pre className={styles.outputContent}>

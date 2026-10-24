@@ -1,14 +1,15 @@
 import '@testing-library/jest-dom/vitest';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { configureAxe, toHaveNoViolations } from 'vitest-axe';
+import { configureAxe } from 'vitest-axe';
+import * as axeMatchers from 'vitest-axe/matchers';
 
 import { i18nBaseOptions } from './src/i18n/options';
 
 // ── axe-core: extend Vitest expect with accessibility matchers ────────────────
 // toHaveNoViolations() fails a test when axe finds critical or serious WCAG
 // violations.  Import and run `axe(container)` in any component test to check.
-expect.extend(toHaveNoViolations);
+expect.extend(axeMatchers);
 
 // Configure axe to only fail on critical/serious violations in tests
 // (the full audit script reports all severity levels).

@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { StrKey } from "@stellar/stellar-sdk";
+import { StrKey } from "@stellar/stellar-base";
 
 /** Largest page a caller may request; keeps a single query bounded. */
 export const MAX_PAGE_SIZE = 100;

@@ -38,8 +38,7 @@ ruler:
   alertmanager_url: http://localhost:9093
 
 # ── Retention ─────────────────────────────────────────────────────────────────
-# 30 days for all logs; the Promtail pipeline labels ERROR-level logs separately
-# so a longer retention can be applied via a compactor retention policy.
+# Keep Loki hot storage aligned with the 30-day CloudWatch retention policy.
 
 limits_config:
   retention_period: 720h    # 30 days default for INFO

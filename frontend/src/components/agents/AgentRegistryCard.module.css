@@ -15,6 +15,7 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   min-width: 0;
   overflow: hidden;
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-primary) 3%, transparent));
 }
 
 .card:hover {
@@ -64,6 +65,139 @@
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
+}
+
+.nameGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.statusOnline {
+  color: var(--status-success-text);
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
+}
+
+.statusOffline {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color, var(--border-strong));
+  border-bottom: 1px solid var(--border-color, var(--border-strong));
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metricLabel {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.metricValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.xlmUnit {
+  color: var(--accent-info);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.hireButton {
+  flex: 1;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: var(--accent-info);
+  color: var(--text-inverse);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hireButton:hover:not(:disabled) {
+  background: var(--primary-hover, var(--accent-info));
+}
+
+.hireButtonDisabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.compareButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.compareButtonSelected {
+  color: var(--text-inverse);
+  border-color: var(--accent-info);
+  background: var(--accent-info);
+}
+
+.compareButton:focus-visible,
+.hireButton:focus-visible {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 2px;
 }
 
 .agentId {
@@ -283,6 +417,100 @@
   background: var(--text-muted, #64748b);
   cursor: not-allowed;
   opacity: 0;
+}
+
+@media (max-width: 767px) {
+  .card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'avatar identity status'
+      'avatar capabilities price'
+      'actions actions actions';
+    align-items: center;
+    gap: 8px 10px;
+    min-height: 132px;
+    padding: 14px;
+    touch-action: pan-y;
+  }
+
+  .header,
+  .nameGroup,
+  .metrics {
+    display: contents;
+  }
+
+  .avatar {
+    grid-area: avatar;
+    width: 40px;
+    height: 40px;
+  }
+
+  .identity {
+    grid-area: identity;
+  }
+
+  .name {
+    max-width: 100%;
+    margin-bottom: 2px;
+    font-size: 0.98rem;
+  }
+
+  .agentId {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statusBadge {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .capabilities {
+    grid-area: capabilities;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .pill {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .metric:first-child {
+    grid-area: price;
+    align-items: flex-end;
+    padding: 0;
+    border: 0;
+  }
+
+  .metric:first-child .metricLabel {
+    display: none;
+  }
+
+  .metric:nth-child(2) {
+    display: none;
+  }
+
+  .metricValue {
+    font-size: 0.8rem;
+  }
+
+  .cardActions {
+    grid-area: actions;
+    width: 100%;
+  }
+
+  .compareButton {
+    display: inline-flex;
+  }
 }
 
 /* Disabled hire CTA is also revealed on hover, but visually muted */

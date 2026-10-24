@@ -108,7 +108,7 @@ describe("agents migrations — 001_create_agents_table", () => {
     const secondRun = migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(secondRun.applied).toEqual([]);
-    expect(getAppliedMigrations(db)).toHaveLength(1);
+    expect(getAppliedMigrations(db)).toHaveLength(2);
     // Table still exists and is intact.
     expect(tables(db)).toContain("agents");
   });
@@ -117,7 +117,7 @@ describe("agents migrations — 001_create_agents_table", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
     expect(tables(db)).toContain("agents");
 
-    rollback(db, MIGRATIONS_DIR);
+    rollback(db, MIGRATIONS_DIR, 2);
 
     expect(tables(db)).not.toContain("agents");
     expect(getAppliedMigrations(db)).toHaveLength(0);
@@ -125,9 +125,9 @@ describe("agents migrations — 001_create_agents_table", () => {
 
   it("down() reverts to exact prior schema (no agents table at all)", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
-    rollback(db, MIGRATIONS_DIR);
+    rollback(db, MIGRATIONS_DIR, 2);
 
-    // No user tables should remain after rolling back the only migration.
+    // No user tables should remain after rolling back every migration.
     expect(tables(db)).toHaveLength(0);
   });
 
@@ -135,12 +135,12 @@ describe("agents migrations — 001_create_agents_table", () => {
     migrateToLatest(db, MIGRATIONS_DIR);
     const colsBefore = columns(db, "agents");
 
-    rollback(db, MIGRATIONS_DIR);
+    rollback(db, MIGRATIONS_DIR, 2);
     migrateToLatest(db, MIGRATIONS_DIR);
 
     expect(tables(db)).toContain("agents");
     expect(columns(db, "agents")).toEqual(colsBefore);
-    expect(getAppliedMigrations(db)).toHaveLength(1);
+    expect(getAppliedMigrations(db)).toHaveLength(2);
   });
 
   it("agents table accepts data and enforces PRIMARY KEY uniqueness", () => {

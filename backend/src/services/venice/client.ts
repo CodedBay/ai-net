@@ -5,6 +5,8 @@ import { CircuitOpenError, TokenBudgetExceededError } from './errors.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
 import { getConfig } from '../../config/index.js';
+import { tracingService } from '../tracing.js';
+import { currentTraceId } from '../traceContext.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -198,24 +200,49 @@ export class VeniceClient implements VeniceClientLike {
     options?: CompleteOptions
   ): Promise<string> {
     const model = this.getModelFor(agentType);
-    return this.createCompletion({
+    return this.withTraceSpan(agentType, model, prompt, () => this.createCompletion({
       messages: [{ role: 'user', content: prompt }],
       model,
       options,
       promptForLogging: prompt,
       agentType,
-    });
+    }));
   }
 
   async chat(messages: VeniceMessage[], options: VeniceChatOptions = {}): Promise<string> {
     const promptForLogging = messages.map(message => message.content).join('\n\n');
-    return this.createCompletion({
+    return this.withTraceSpan('chat', options.model ?? DEFAULT_CHAT_MODEL, promptForLogging, () => this.createCompletion({
       messages,
       model: options.model ?? DEFAULT_CHAT_MODEL,
       options,
       promptForLogging,
       agentType: 'chat',
-    });
+    }));
+  }
+
+  private async withTraceSpan(
+    agentType: string,
+    model: string,
+    prompt: string,
+    work: () => Promise<string>,
+  ): Promise<string> {
+    const traceId = currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'venice', 'completion', {
+          agentType,
+          model,
+          promptTokenCount: Math.ceil(prompt.length / 4),
+        })
+      : null;
+
+    try {
+      const result = await work();
+      if (span) tracingService.endSpan(span.spanId, 'completed', { outputSizeBytes: Buffer.byteLength(result, 'utf8') });
+      return result;
+    } catch (error) {
+      if (span) tracingService.endSpan(span.spanId, 'failed', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   }
 
   private async createCompletion({

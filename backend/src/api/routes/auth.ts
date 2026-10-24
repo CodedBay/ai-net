@@ -6,10 +6,11 @@ import { ValidationError } from "../../errors/ValidationError";
 import { emptyBodySchema, stellarPublicKeySchema } from "../../schemas/common";
 import { validate } from "../middleware/validate";
 
-const createTokenSchema = z.object({
-  walletPublicKey: stellarPublicKeySchema,
-  deviceId: z.string().trim().min(1, "deviceId is required").max(128),
-  deviceName: z.string().max(128).optional(),
+const walletVerifySchema = z.object({
+  publicKey: stellarPublicKeySchema,
+  nonce: z.string().min(1).max(128),
+  signature: z.string().min(1).max(256),
+  deviceId: z.string().trim().min(1).max(128).default("wallet"),
 }).strict();
 
 const refreshTokenSchema = z.object({
@@ -25,45 +26,21 @@ export function createAuthRouter(authService?: AuthService): Router {
   const router = Router();
   const service = authService ?? getAuthService();
 
-  /**
-   * @openapi
-   * /api/auth/token:
-   *   post:
-   *     summary: Issue access and refresh token pair
-   *     description: Establishes a new authenticated session family for a wallet & device.
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [walletPublicKey, deviceId]
-   *             properties:
-   *               walletPublicKey:
-   *                 type: string
-   *               deviceId:
-   *                 type: string
-   *               deviceName:
-   *                 type: string
-   *     responses:
-   *       200:
-   *         description: Tokens issued successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/AuthTokensResponse'
-   */
-  router.post("/token", validate(createTokenSchema), (req: Request, res: Response, next: NextFunction) => {
+  router.get("/nonce", (_req: Request, res: Response) => {
+    res.status(200).json(service.createWalletNonce());
+  });
+
+  const verifyWallet = (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { walletPublicKey, deviceId, deviceName } = req.body as z.infer<typeof createTokenSchema>;
+      const { publicKey, nonce, signature, deviceId } = req.body as z.infer<typeof walletVerifySchema>;
       const ipAddress = req.ip || req.socket.remoteAddress || "unknown";
       const userAgent = req.headers["user-agent"] || "unknown";
 
-      const tokens = service.createSession({
-        walletPublicKey,
+      const tokens = service.verifyWalletSignature({
+        walletPublicKey: publicKey,
+        nonce,
+        signature,
         deviceId,
-        deviceName,
         ipAddress,
         userAgent,
       });
@@ -72,7 +49,9 @@ export function createAuthRouter(authService?: AuthService): Router {
     } catch (err) {
       next(err);
     }
-  });
+  };
+  router.post("/verify", validate(walletVerifySchema), verifyWallet);
+  router.post("/token", validate(walletVerifySchema), verifyWallet);
 
   /**
    * @openapi
@@ -100,6 +79,10 @@ export function createAuthRouter(authService?: AuthService): Router {
    *               $ref: '#/components/schemas/TokenRefreshResponse'
    *       401:
    *         description: Invalid, expired, or reused refresh token
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
    */
   router.post("/refresh", validate(refreshTokenSchema), (req: Request, res: Response, next: NextFunction) => {
     try {

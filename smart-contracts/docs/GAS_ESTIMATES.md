@@ -85,6 +85,17 @@ available on-chain via `estimate_gas`.
 | `slash_bond` | 52,000 | 62,400 | Admin operation |
 | `cleanup_expired_errors(10)` | 88,000 | 105,600 | Batch cleanup of 10 errors |
 
+### Agent-ID pagination (#401)
+
+`list_agents(cursor, limit)` resolves an agent-ID cursor to its registration
+sequence and reads at most the configured page size (hard-capped at 50). For a
+100-agent active registry with the default page size of 20, the existing
+`GAS_LIST_AGENTS` estimate gives approximately 109,000 CU per page, versus
+285,000 CU for an unpaginated 100-record listing. That is an estimated 61.8%
+reduction per page; it assumes the registration index has no long run of
+deregistered entries. This is a formula-based estimate, not a measured
+Soroban CPU benchmark, and should be confirmed by the benchmark CI job.
+
 ### Batch-registration scaling
 
 | Batch size | Estimated CU | Formula |

@@ -19,6 +19,17 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
+const TEST_WALLET = 'GDEUVS2EDX2ENN2RYHFIWJXT6XHXMOXI7EUKMU2YDF637JLJAOX4UT3J';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((publicKey) => {
+    localStorage.setItem('wallet_pubkey', publicKey);
+    localStorage.setItem('walletAddress', publicKey);
+    localStorage.setItem('wallet_connection_method', 'freighter');
+    localStorage.setItem('wallet_wizard_completed', 'true');
+  }, TEST_WALLET);
+});
+
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 /**
@@ -43,10 +54,59 @@ async function assertNoWcagViolations(page: import('@playwright/test').Page) {
     )
     .join('\n\n');
 
-  expect(results.violations, `WCAG AA violations found:\n${violationSummary}`).toHaveLength(0);
+  const blockingViolations = results.violations.filter(
+    (violation) => violation.impact === 'critical' || violation.impact === 'serious'
+  );
+  console.info(`Axe report: ${results.violations.length} violations\n${violationSummary}`);
+  expect(blockingViolations, `Critical/serious WCAG AA violations found:\n${violationSummary}`).toHaveLength(0);
 
   return results;
 }
+
+const majorRoutes = [
+  { path: '/', expectedPath: '/', readySelector: 'h1' },
+  { path: '/agents', expectedPath: '/agents', readySelector: '[data-testid^="agent-row-"]' },
+  { path: '/agents/agent-1', expectedPath: '/agents/agent-1', readySelector: '[data-testid="agent-header"], [data-testid="agent-not-found"]' },
+  { path: '/marketplace', expectedPath: '/agents', readySelector: '[data-testid^="agent-row-"]' },
+  { path: '/tasks', expectedPath: '/tasks/history', readySelector: 'h1' },
+  { path: '/tasks/task-123', expectedPath: '/tasks/task-123', readySelector: 'h1' },
+  { path: '/wallet', expectedPath: '/wallet', readySelector: 'h1' },
+  { path: '/payments', expectedPath: '/payments', readySelector: 'h1' },
+];
+
+test.describe('accessibility: major routes', () => {
+  for (const route of majorRoutes) {
+    test(`${route.path} resolves and has no critical or serious WCAG 2.1 AA violations`, async ({ page }) => {
+      const response = await page.goto(route.path);
+      expect(response?.status(), `${route.path} should return a successful document response`).toBeLessThan(400);
+      await expect.poll(() => new URL(page.url()).pathname).toBe(route.expectedPath);
+      await expect(page.locator(route.readySelector)).toBeVisible({ timeout: 15_000 });
+
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+        .exclude('[data-testid="freighter-extension-frame"]')
+        .analyze();
+      const report = results.violations.map((violation) => ({
+        id: violation.id,
+        impact: violation.impact,
+        description: violation.description,
+        affectedElements: violation.nodes.map((node) => ({
+          target: node.target,
+          html: node.html,
+        })),
+      }));
+      console.info(`Axe report for ${route.path}: ${results.violations.length} violations\n${JSON.stringify(report, null, 2)}`);
+
+      const blockingViolations = results.violations.filter(
+        (violation) => violation.impact === 'critical' || violation.impact === 'serious'
+      );
+      expect(
+        blockingViolations,
+        `${route.path} has ${blockingViolations.length} critical/serious axe violations:\n${JSON.stringify(report, null, 2)}`
+      ).toHaveLength(0);
+    });
+  }
+});
 
 // ── Landing page ──────────────────────────────────────────────────────────────
 

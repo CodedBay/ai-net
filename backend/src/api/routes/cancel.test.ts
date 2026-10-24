@@ -16,9 +16,9 @@
 
 import express, { Router } from 'express';
 import request from 'supertest';
-import { createCancelTaskRouter } from '../cancel';
-import type { JobQueue, JobStore, Job } from '../../../queue';
-import type { TaskDb } from '../../../db/tasks';
+import { createCancelTaskRouter } from './cancel';
+import type { JobQueue, JobStore, Job } from '../../queue';
+import type { TaskDb } from '../../db/tasks';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,22 +64,29 @@ function buildApp(
   app.use(express.json());
 
   // Inject mocked db via module-level mock override
-  jest.doMock('../../../db/tasks', () => ({
+  jest.doMock('../../db/tasks', () => ({
     getTaskDb: jest.fn(),
     createTaskDb: jest.fn(() => taskDb),
   }));
-  jest.doMock('../../../db/index', () => ({
+  jest.doMock('../../db/index', () => ({
     getDb: jest.fn(() => ({})),
   }));
-  jest.doMock('../../../config', () => ({
+  jest.doMock('../../config', () => ({
     getConfig: jest.fn(() => ({
       ADMIN_API_KEY: 'test-admin-key',
       STELLAR_COORDINATOR_SECRET: undefined, // no Stellar in unit tests
+      LOG_LEVEL: 'silent', // logger (pino) initialises from this module too
     })),
   }));
 
+  // Re-require AFTER jest.doMock so the router picks up the mocked deps
+  // (the top-level import captured the real modules before the mocks existed).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createCancelTaskRouter: freshCreateCancelTaskRouter } =
+    jest.requireActual<typeof import("./cancel")>("./cancel");
+
   const router = Router({ mergeParams: true });
-  router.use('/:id/cancel', createCancelTaskRouter({
+  router.use('/:id/cancel', freshCreateCancelTaskRouter({
     queue: queue as JobQueue,
     paymentService,
   }));
@@ -196,10 +203,11 @@ describe('POST /api/tasks/:id/cancel', () => {
     };
 
     // Re-mock config with a secret so the refund path is entered.
-    jest.doMock('../../../config', () => ({
+    jest.doMock('../../config', () => ({
       getConfig: jest.fn(() => ({
         ADMIN_API_KEY: 'test-admin-key',
         STELLAR_COORDINATOR_SECRET: 'SAA...FAKE',
+        LOG_LEVEL: 'silent',
       })),
     }));
     jest.doMock('@stellar/stellar-sdk', () => ({

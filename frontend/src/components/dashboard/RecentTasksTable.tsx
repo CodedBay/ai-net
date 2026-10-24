@@ -15,9 +15,10 @@ import { EmptyState } from '../common/EmptyState';
 interface Props {
   walletAddress: string;
   loading: boolean;
+  onTasksLoaded?: (count: number) => void;
 }
 
-export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) => {
+export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading, onTasksLoaded }) => {
   const [tasks, setTasks] = React.useState<TaskResponse[]>([]);
   const { showToast } = useToast();
   const { t, i18n } = useTranslation();
@@ -32,6 +33,7 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
           id: task.id || task.taskId,
         }));
         setTasks(mappedTasks);
+        onTasksLoaded?.(mappedTasks.length);
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Failed to load recent tasks.';
         showToast(message, 'error');
@@ -45,7 +47,7 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
       }
     };
     fetchTasks();
-  }, [walletAddress, showToast, i18n]);
+  }, [walletAddress, showToast, i18n, onTasksLoaded]);
 
   if (loading) {
     return (

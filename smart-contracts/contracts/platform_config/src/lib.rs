@@ -42,6 +42,12 @@ pub const DEFAULT_ESCROW_TIMEOUT_DAYS: u32 = 7;
 pub const DEFAULT_MAX_CAPABILITIES_PER_AGENT: u32 = 10;
 /// Default platform fee in basis points (0 = no fee).
 pub const DEFAULT_PLATFORM_FEE_BPS: u32 = 50; // 0.5 %
+/// Default timelock: 48 hours in seconds.
+pub const TIMELOCK_SECS: u64 = 172_800;
+/// Default voting period in ledgers (10,080 ledgers / ~7 days).
+pub const DEFAULT_VOTING_PERIOD_LEDGERS: u32 = 10_080;
+/// Default quorum threshold in basis points (10% = 1,000 bps).
+pub const DEFAULT_QUORUM_THRESHOLD_BPS: u32 = 1_000;
 
 /// TTL extension threshold (ledgers remaining) — extend when below this.
 const TTL_THRESHOLD: u32 = 50_000;
@@ -88,6 +94,15 @@ pub struct ConfigUpdatedEvent {
     pub new_config: PlatformConfig,
 }
 
+/// Pending platform fee change awaiting governance timelock.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingFeeChange {
+    pub new_fee_bps: u32,
+    pub proposed_at: u64,
+    pub eta: u64,
+}
+
 /// Storage key enumeration for `Instance` storage.
 #[contracttype]
 #[derive(Clone)]
@@ -100,6 +115,18 @@ pub enum DataKey {
     MultisigThreshold,
     /// The current platform configuration struct.
     Config,
+    /// Protocol treasury address receiving platform fees.
+    Treasury,
+    /// Pending platform fee change awaiting 48h timelock.
+    PendingFeeChange,
+    /// Cumulative platform fees recorded in stroops.
+    TotalFeesCollected,
+    /// Voting period in ledgers.
+    VotingPeriodLedgers,
+    /// Quorum threshold in basis points.
+    QuorumThresholdBps,
+    /// Threshold for specific multisig governance actions.
+    ActionThreshold(soroban_sdk::Symbol),
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -312,6 +339,184 @@ impl PlatformConfigContract {
     pub fn get_platform_fee_bps(env: Env) -> u32 {
         read_config(&env).platform_fee_bps
     }
+
+    // ── Treasury & Platform Fee Governance (Issue #412) ──────────────────────
+
+    /// Configure protocol treasury address to receive platform fees.
+    pub fn set_treasury(env: Env, caller: Address, treasury: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+        env.storage().instance().set(&DataKey::Treasury, &treasury);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Query the configured treasury address.
+    pub fn get_treasury(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Treasury)
+    }
+
+    /// Propose a new platform fee with a mandatory 48-hour timelock.
+    pub fn propose_fee_change(env: Env, caller: Address, new_fee_bps: u32) -> Result<u64, Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+
+        if new_fee_bps > 10_000 {
+            return Err(Error::InvalidPlatformFee);
+        }
+
+        let now = env.ledger().timestamp();
+        let eta = now.saturating_add(TIMELOCK_SECS);
+        let pending = PendingFeeChange {
+            new_fee_bps,
+            proposed_at: now,
+            eta,
+        };
+
+        env.storage().instance().set(&DataKey::PendingFeeChange, &pending);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+
+        env.events().publish(
+            (symbol_short!("plt_cfg"), symbol_short!("fee_prop")),
+            (caller, new_fee_bps, eta),
+        );
+
+        Ok(eta)
+    }
+
+    /// Apply the pending platform fee change once the 48-hour timelock has elapsed.
+    pub fn apply_fee_change(env: Env, caller: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+
+        let pending: PendingFeeChange = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingFeeChange)
+            .ok_or(Error::NoPendingFeeChange)?;
+
+        let now = env.ledger().timestamp();
+        if now < pending.eta {
+            return Err(Error::TimelockNotElapsed);
+        }
+
+        let mut config = read_config(&env);
+        config.platform_fee_bps = pending.new_fee_bps;
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().remove(&DataKey::PendingFeeChange);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+
+        env.events().publish(
+            (symbol_short!("plt_cfg"), symbol_short!("fee_app")),
+            (caller, pending.new_fee_bps),
+        );
+
+        Ok(())
+    }
+
+    /// Cancel a pending platform fee change before it takes effect.
+    pub fn cancel_fee_change(env: Env, caller: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+
+        if !env.storage().instance().has(&DataKey::PendingFeeChange) {
+            return Err(Error::NoPendingFeeChange);
+        }
+
+        env.storage().instance().remove(&DataKey::PendingFeeChange);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// View pending fee change if one is scheduled.
+    pub fn get_pending_fee_change(env: Env) -> Option<PendingFeeChange> {
+        env.storage().instance().get(&DataKey::PendingFeeChange)
+    }
+
+    /// Record fees collected across protocol executions.
+    pub fn record_fee_collected(env: Env, fee_amount: i128) -> Result<(), Error> {
+        if fee_amount <= 0 {
+            return Ok(());
+        }
+        let current: i128 = env.storage().instance().get(&DataKey::TotalFeesCollected).unwrap_or(0);
+        let updated = current.saturating_add(fee_amount);
+        env.storage().instance().set(&DataKey::TotalFeesCollected, &updated);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Query cumulative platform fees collected in stroops.
+    pub fn get_total_fees_collected(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::TotalFeesCollected).unwrap_or(0)
+    }
+
+    // ── Governance Configuration (Issue #408) ────────────────────────────────
+
+    /// Configure governance proposal voting period in ledgers.
+    pub fn set_voting_period_ledgers(env: Env, caller: Address, period: u32) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+        env.storage().instance().set(&DataKey::VotingPeriodLedgers, &period);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Query voting period in ledgers (default: 10,080).
+    pub fn get_voting_period_ledgers(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::VotingPeriodLedgers)
+            .unwrap_or(DEFAULT_VOTING_PERIOD_LEDGERS)
+    }
+
+    /// Configure governance proposal quorum threshold in basis points.
+    pub fn set_quorum_threshold_bps(env: Env, caller: Address, bps: u32) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+        if bps > 10_000 {
+            return Err(Error::InvalidPlatformFee); // reuse 10,000 max bound
+        }
+        env.storage().instance().set(&DataKey::QuorumThresholdBps, &bps);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Query governance proposal quorum threshold in bps (default: 1,000 = 10%).
+    pub fn get_quorum_threshold_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::QuorumThresholdBps)
+            .unwrap_or(DEFAULT_QUORUM_THRESHOLD_BPS)
+    }
+
+    // ── Multisig Action Thresholds (Issue #416) ──────────────────────────────
+
+    /// Configure M-of-N threshold requirement for a specific governance action type.
+    pub fn set_action_threshold(
+        env: Env,
+        caller: Address,
+        action_type: soroban_sdk::Symbol,
+        threshold: u32,
+    ) -> Result<(), Error> {
+        require_admin(&env)?;
+        caller.require_auth();
+        if threshold == 0 {
+            return Err(Error::InvalidThreshold);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ActionThreshold(action_type), &threshold);
+        env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        Ok(())
+    }
+
+    /// Query threshold requirement for a given action type.
+    pub fn get_action_threshold(env: Env, action_type: soroban_sdk::Symbol) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ActionThreshold(action_type))
+            .unwrap_or(0)
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -320,7 +525,7 @@ impl PlatformConfigContract {
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events},
+        testutils::{Address as _, Events, Ledger as _},
         Address, Env, IntoVal,
     };
 
@@ -512,5 +717,78 @@ mod test {
             f.client.try_update_config(&outsider, &new_config),
             Err(Ok(Error::Unauthorized))
         );
+    }
+
+    // ── Fee Governance & Timelock Tests (Issue #412) ──────────────────────────
+
+    #[test]
+    fn treasury_configuration() {
+        let f = fixture();
+        let treasury = Address::generate(&f.env);
+        f.client.set_treasury(&f.admin, &treasury);
+        assert_eq!(f.client.get_treasury(), Some(treasury));
+    }
+
+    #[test]
+    fn fee_change_timelock_enforced() {
+        let f = fixture();
+        f.env.ledger().with_mut(|l| l.timestamp = 1_000_000);
+
+        // Propose changing fee to 100 bps (1%)
+        let eta = f.client.propose_fee_change(&f.admin, &100);
+        assert_eq!(eta, 1_000_000 + TIMELOCK_SECS);
+
+        // Trying to apply before timelock elapses must revert
+        f.env.ledger().with_mut(|l| l.timestamp = 1_000_000 + 3600); // only 1 hour elapsed
+        assert_eq!(
+            f.client.try_apply_fee_change(&f.admin),
+            Err(Ok(Error::TimelockNotElapsed))
+        );
+
+        // Advance past timelock (48 hours + 1 second)
+        f.env.ledger().with_mut(|l| l.timestamp = 1_000_000 + TIMELOCK_SECS + 1);
+        f.client.apply_fee_change(&f.admin);
+
+        assert_eq!(f.client.get_platform_fee_bps(), 100);
+        assert_eq!(f.client.get_pending_fee_change(), None);
+    }
+
+    #[test]
+    fn zero_fee_configuration_supported() {
+        let f = fixture();
+        f.env.ledger().with_mut(|l| l.timestamp = 1_000_000);
+        f.client.propose_fee_change(&f.admin, &0);
+        f.env.ledger().with_mut(|l| l.timestamp = 1_000_000 + TIMELOCK_SECS + 1);
+        f.client.apply_fee_change(&f.admin);
+        assert_eq!(f.client.get_platform_fee_bps(), 0);
+    }
+
+    #[test]
+    fn fee_collection_accounting() {
+        let f = fixture();
+        assert_eq!(f.client.get_total_fees_collected(), 0);
+        f.client.record_fee_collected(&1_000_000_i128); // 1 XLM collected
+        assert_eq!(f.client.get_total_fees_collected(), 1_000_000_i128);
+        f.client.record_fee_collected(&2_500_000_i128);
+        assert_eq!(f.client.get_total_fees_collected(), 3_500_000_i128);
+    }
+
+    #[test]
+    fn governance_and_multisig_config_extensions() {
+        let f = fixture();
+        // Voting period (Issue #408)
+        assert_eq!(f.client.get_voting_period_ledgers(), DEFAULT_VOTING_PERIOD_LEDGERS);
+        f.client.set_voting_period_ledgers(&f.admin, &20_000);
+        assert_eq!(f.client.get_voting_period_ledgers(), 20_000);
+
+        // Quorum (Issue #408)
+        assert_eq!(f.client.get_quorum_threshold_bps(), DEFAULT_QUORUM_THRESHOLD_BPS);
+        f.client.set_quorum_threshold_bps(&f.admin, &1_500);
+        assert_eq!(f.client.get_quorum_threshold_bps(), 1_500);
+
+        // Multisig action thresholds (Issue #416)
+        let upgrade_sym = soroban_sdk::Symbol::new(&f.env, "upgrade");
+        f.client.set_action_threshold(&f.admin, &upgrade_sym, &3);
+        assert_eq!(f.client.get_action_threshold(&upgrade_sym), 3);
     }
 }

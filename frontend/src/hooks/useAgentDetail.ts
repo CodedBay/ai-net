@@ -6,6 +6,8 @@ import type { AgentReputation } from '../types/agent';
 export interface AgentDetailResult {
   agent: AgentRecord | null;
   reputation: AgentReputation | null;
+  reputationHistory?: import('../types/agent').ReputationHistory[];
+  reputationHistoryLoading?: boolean;
   loading: boolean;
   agentLoading: boolean;
   reputationLoading: boolean;
@@ -23,6 +25,8 @@ export interface AgentDetailResult {
 export function useAgentDetail(agentId: string): AgentDetailResult {
   const [agent, setAgent] = useState<AgentRecord | null>(null);
   const [reputation, setReputation] = useState<AgentReputation | null>(null);
+  const [reputationHistory, setReputationHistory] = useState<import('../types/agent').ReputationHistory[]>([]);
+  const [reputationHistoryLoading, setReputationHistoryLoading] = useState(true);
   const [agentLoading, setAgentLoading] = useState(true);
   const [reputationLoading, setReputationLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +40,7 @@ export function useAgentDetail(agentId: string): AgentDetailResult {
 
     setAgentLoading(true);
     setReputationLoading(true);
+    setReputationHistoryLoading(true);
     setError(null);
     setNotFound(false);
 
@@ -72,6 +77,19 @@ export function useAgentDetail(agentId: string): AgentDetailResult {
         }
       });
 
+    import('../services/api').then(({ getAgentReputationHistory }) =>
+      getAgentReputationHistory(agentId)
+        .then((history) => {
+          if (mounted) setReputationHistory(history);
+        })
+        .catch(() => {
+          if (mounted) setReputationHistory([]);
+        })
+        .finally(() => {
+          if (mounted) setReputationHistoryLoading(false);
+        }),
+    );
+
     return () => {
       mounted = false;
     };
@@ -84,6 +102,8 @@ export function useAgentDetail(agentId: string): AgentDetailResult {
   return {
     agent,
     reputation,
+    reputationHistory,
+    reputationHistoryLoading,
     loading,
     agentLoading,
     reputationLoading,

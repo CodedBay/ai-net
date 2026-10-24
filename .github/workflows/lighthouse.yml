@@ -1,6 +1,11 @@
 name: Lighthouse CI
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/lighthouse.yml'
   pull_request:
     branches: [main]
     paths:
@@ -8,6 +13,7 @@ on:
       - '.github/workflows/lighthouse.yml'
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
 
@@ -34,13 +40,81 @@ jobs:
       - name: Build frontend
         run: cd frontend && npx vite build
 
+      # Find the latest successful main run that stored a baseline artifact.
+      - name: Find latest Lighthouse baseline
+        id: baseline
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'lighthouse.yml',
+              branch: 'main',
+              status: 'success',
+              per_page: 20,
+            });
+
+            for (const run of data.workflow_runs) {
+              if (run.event !== 'push') continue;
+              const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id,
+              });
+              if (artifacts.artifacts.some(artifact =>
+                artifact.name === 'lighthouse-baseline' && !artifact.expired
+              )) {
+                core.setOutput('run-id', String(run.id));
+                return;
+              }
+            }
+            core.warning('No successful main-branch Lighthouse baseline artifact is available yet.');
+
+      # Download the baseline artifact from that completed main-branch run.
+      - name: Download baseline Lighthouse scores
+        id: download-baseline
+        if: steps.baseline.outputs.run-id != ''
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: lighthouse-baseline
+          path: frontend/.lighthouseci-baseline
+          run-id: ${{ steps.baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+
       - name: Run Lighthouse CI
         id: lhci
         uses: treosh/lighthouse-ci-action@v12
         with:
           working-directory: frontend
           configPath: ./lighthouserc.cjs
+          budgetPath: ./budget.json
+          uploadArtifacts: true
+          temporaryPublicStorage: false
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
 
+      # Upload current run results as baseline for future trend comparisons
+      - name: Upload Lighthouse results as baseline
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-baseline
+          path: frontend/.lighthouseci/
+          retention-days: 90
+
+      # Always upload PR run results for audit trail
+      - name: Upload Lighthouse results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-results-${{ github.run_number }}
+          path: frontend/.lighthouseci/
+          retention-days: 30
+
+      # Post detailed PR comment with scores and trend vs baseline
       - name: Post Lighthouse scores to PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v9
@@ -49,21 +123,43 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            // Read all Lighthouse result files
+            const THRESHOLDS = {
+              performance:   { min: 90,   type: 'min', label: 'Performance' },
+              accessibility: { min: 95,   type: 'min', label: 'Accessibility' },
+              seo:           { min: 90,   type: 'min', label: 'SEO' },
+              bestPractices: { min: 95,   type: 'min', label: 'Best Practices' },
+            };
+
+            // Read all Lighthouse result files from current run
             const resultsDir = path.join('frontend', '.lighthouseci');
             let results = [];
 
             try {
-              const files = fs.readdirSync(resultsDir).filter(f => f.startsWith('lhr-') && f.endsWith('.json'));
+              const files = fs.readdirSync(resultsDir)
+                .filter(f => f.startsWith('lhr-') && f.endsWith('.json'));
               for (const file of files) {
-                const content = JSON.parse(fs.readFileSync(path.join(resultsDir, file), 'utf8'));
+                const content = JSON.parse(
+                  fs.readFileSync(path.join(resultsDir, file), 'utf8')
+                );
                 results.push({
                   url: content.finalUrl || content.requestedUrl,
                   scores: {
-                    performance: Math.round((content.categories?.performance?.score || 0) * 100),
+                    performance:   Math.round((content.categories?.performance?.score   || 0) * 100),
                     accessibility: Math.round((content.categories?.accessibility?.score || 0) * 100),
-                    seo: Math.round((content.categories?.seo?.score || 0) * 100),
-                    bestPractices: Math.round((content.categories?.best-practices?.score || 0) * 100),
+                    seo:           Math.round((content.categories?.seo?.score           || 0) * 100),
+                    bestPractices: Math.round((content.categories?.['best-practices']?.score || 0) * 100),
+                  },
+                  audits: {
+                    lcp: content.audits?.['largest-contentful-paint']?.numericValue,
+                    cls: content.audits?.['cumulative-layout-shift']?.numericValue,
+                    tbt: content.audits?.['total-blocking-time']?.numericValue,
+                    fcp: content.audits?.['first-contentful-paint']?.numericValue,
+                    si:  content.audits?.['speed-index']?.numericValue,
+                    tti: content.audits?.['interactive']?.numericValue,
+                    scriptSize: content.audits?.['resource-summary']?.details?.items
+                      ?.find(i => i.resourceType === 'script')?.transferSize,
+                    totalSize: content.audits?.['resource-summary']?.details?.items
+                      ?.find(i => i.resourceType === 'total')?.transferSize,
                   },
                 });
               }
@@ -71,43 +167,132 @@ jobs:
               core.warning(`Could not read Lighthouse results: ${err.message}`);
             }
 
+            // Aggregate multiple runs per URL (take median)
+            const byUrl = {};
+            for (const r of results) {
+              const key = new URL(r.url).pathname || '/';
+              if (!byUrl[key]) byUrl[key] = [];
+              byUrl[key].push(r);
+            }
+
+            // Read baseline scores for trend arrows
+            let baseline = {};
+            try {
+              const baselineDir = path.join('frontend', '.lighthouseci-baseline');
+              const baselineFiles = fs.readdirSync(baselineDir)
+                .filter(f => f.startsWith('lhr-') && f.endsWith('.json'));
+              for (const file of baselineFiles) {
+                const content = JSON.parse(
+                  fs.readFileSync(path.join(baselineDir, file), 'utf8')
+                );
+                const urlKey = new URL(content.finalUrl || content.requestedUrl).pathname || '/';
+                baseline[urlKey] = {
+                  performance:   Math.round((content.categories?.performance?.score   || 0) * 100),
+                  accessibility: Math.round((content.categories?.accessibility?.score || 0) * 100),
+                  seo:           Math.round((content.categories?.seo?.score           || 0) * 100),
+                  bestPractices: Math.round((content.categories?.['best-practices']?.score || 0) * 100),
+                };
+              }
+            } catch (_e) {
+              // No baseline available — first run
+            }
+
+            function trend(current, baselineScore) {
+              if (baselineScore === undefined) return '';
+              const diff = current - baselineScore;
+              if (diff > 0)  return ` ↑${diff}`;
+              if (diff < 0)  return ` ↓${Math.abs(diff)}`;
+              return ' →0';
+            }
+
+            function scoreIcon(score, threshold) {
+              return score >= threshold ? '✅' : '❌';
+            }
+
+            function ms(value) {
+              if (value === undefined) return '—';
+              return `${(value / 1000).toFixed(2)}s`;
+            }
+
+            function kb(bytes) {
+              if (bytes === undefined) return '—';
+              return `${(bytes / 1024).toFixed(1)} KB`;
+            }
+
             if (results.length === 0) {
               core.warning('No Lighthouse results found. Skipping PR comment.');
               return;
             }
 
-            // Build markdown table
-            let body = '## 🔍 Lighthouse CI Results\n\n';
-            body += '| Route | Performance | Accessibility | SEO | Best Practices |\n';
-            body += '|-------|-------------|---------------|-----|----------------|\n';
+            // Build markdown report
+            let body = '## 🔍 Lighthouse CI — Performance Budget Report\n\n';
 
             let allPassed = true;
-            for (const r of results) {
-              const route = new URL(r.url).pathname || '/';
-              const perf = r.scores.performance;
-              const a11y = r.scores.accessibility;
-              const seo = r.scores.seo;
-              const bp = r.scores.bestPractices;
 
-              const perfIcon = perf >= 80 ? '✅' : '❌';
-              const a11yIcon = a11y >= 95 ? '✅' : '❌';
-              const seoIcon = seo >= 80 ? '✅' : '⚠️';
+            for (const [route, runs] of Object.entries(byUrl)) {
+              // Use the last run result for display (runs are sorted by time)
+              const r = runs[runs.length - 1];
+              const b = baseline[route] || {};
 
-              if (perf < 80 || a11y < 95) allPassed = false;
+              const { performance: perf, accessibility: a11y, seo, bestPractices: bp } = r.scores;
+              const { lcp, cls, tbt, fcp, si, tti, scriptSize, totalSize } = r.audits;
 
-              body += `| \`${route}\` | ${perfIcon} ${perf}/100 | ${a11yIcon} ${a11y}/100 | ${seoIcon} ${seo}/100 | ${bp}/100 |\n`;
+              const perfPass  = perf  >= THRESHOLDS.performance.min;
+              const a11yPass  = a11y  >= THRESHOLDS.accessibility.min;
+              const seoPass   = seo   >= THRESHOLDS.seo.min;
+              const bpPass    = bp    >= THRESHOLDS.bestPractices.min;
+              const lcpPass   = typeof lcp === 'number' && lcp < 2500;
+              const clsPass   = typeof cls === 'number' && cls < 0.1;
+              const tbtPass   = typeof tbt === 'number' && tbt < 200;
+              const scriptPass = typeof scriptSize === 'number' && scriptSize < 204800;
+              const totalPass  = typeof totalSize === 'number' && totalSize < 512000;
+
+              if (!perfPass || !a11yPass || !seoPass || !bpPass || !lcpPass || !clsPass || !tbtPass || !scriptPass || !totalPass) {
+                allPassed = false;
+              }
+
+              body += `### Route: \`${route}\`\n\n`;
+
+              // Scores table
+              body += '**Lighthouse Scores**\n\n';
+              body += '| Category | Score | Threshold | Status | Trend |\n';
+              body += '|----------|-------|-----------|--------|-------|\n';
+              body += `| Performance   | ${perf}/100   | ≥ 90 | ${scoreIcon(perf,  90)}  | ${trend(perf,  b.performance)}   |\n`;
+              body += `| Accessibility | ${a11y}/100   | ≥ 95 | ${scoreIcon(a11y, 95)}  | ${trend(a11y,  b.accessibility)} |\n`;
+              body += `| Best Practices| ${bp}/100     | ≥ 95 | ${scoreIcon(bp,   95)}  | ${trend(bp,    b.bestPractices)} |\n`;
+              body += `| SEO           | ${seo}/100    | ≥ 90 | ${scoreIcon(seo,  90)}  | ${trend(seo,   b.seo)}           |\n`;
+              body += '\n';
+
+              // Core Web Vitals table
+              body += '**Core Web Vitals**\n\n';
+              body += '| Metric | Value | Budget | Status |\n';
+              body += '|--------|-------|--------|--------|\n';
+              body += `| LCP (Largest Contentful Paint) | ${ms(lcp)} | < 2.5s  | ${lcpPass  ? '✅' : '❌'} |\n`;
+              body += `| CLS (Cumulative Layout Shift)  | ${cls !== undefined ? cls.toFixed(3) : '—'} | < 0.1   | ${clsPass  ? '✅' : '❌'} |\n`;
+              body += `| TBT (Total Blocking Time)      | ${tbt !== undefined ? `${Math.round(tbt)}ms` : '—'} | < 200ms | ${tbtPass  ? '✅' : '❌'} |\n`;
+              body += `| FCP (First Contentful Paint)   | ${ms(fcp)} | < 1.8s  | ${fcp === undefined || fcp < 1800 ? '✅' : '⚠️'} |\n`;
+              body += `| Speed Index                    | ${ms(si)}  | < 3.4s  | ${si  === undefined || si  < 3400 ? '✅' : '⚠️'} |\n`;
+              body += `| TTI (Time to Interactive)      | ${ms(tti)} | < 3.8s  | ${tti === undefined || tti < 3800 ? '✅' : '⚠️'} |\n`;
+              body += '\n';
+
+              // Bundle size table
+              body += '**Bundle Size Budget**\n\n';
+              body += '| Resource | Size | Budget | Status |\n';
+              body += '|----------|------|--------|--------|\n';
+              body += `| JavaScript (main chunk) | ${kb(scriptSize)} | < 200 KB | ${scriptPass ? '✅' : '❌'} |\n`;
+              body += `| Total page weight       | ${kb(totalSize)}  | < 500 KB | ${totalPass  ? '✅' : '❌'} |\n`;
+              body += '\n';
             }
 
-            body += '\n### Thresholds\n';
-            body += '- **Performance**: ≥ 80\n';
-            body += '- **Accessibility**: ≥ 95\n';
-            body += '- **SEO**: ≥ 80 (budget)\n\n';
-
+            body += '---\n\n';
             if (allPassed) {
-              body += '✅ All Lighthouse gates passed.\n';
+              body += '✅ **All performance budget thresholds passed.** Great work!\n';
             } else {
-              body += '❌ **One or more Lighthouse gates failed.** Please fix the issues above before merging.\n';
+              body += '❌ **One or more performance budget thresholds failed.** Please fix the issues above before merging.\n\n';
+              body += '> **Tip**: Run `cd frontend && npx lhci autorun` locally to debug failing audits.\n';
             }
+
+            body += `\n<sub>Powered by [Lighthouse CI](https://github.com/GoogleChrome/lighthouse-ci) — run #${{ github.run_number }}</sub>\n`;
 
             // Find existing bot comment to update instead of creating duplicates
             const { data: comments } = await github.rest.issues.listComments({
@@ -117,7 +302,7 @@ jobs:
             });
 
             const botComment = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('🔍 Lighthouse CI Results')
+              c.user.type === 'Bot' && c.body.includes('🔍 Lighthouse CI')
             );
 
             if (botComment) {

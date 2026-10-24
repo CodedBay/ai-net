@@ -5,6 +5,12 @@
 **Tool:** axe-core 4.x + manual keyboard/screen-reader testing
 **Lighthouse accessibility threshold:** ≥ 95 (configured in `frontend/lighthouserc.cjs`)
 
+## Automated Route Coverage
+
+`frontend/tests/e2e/accessibility.spec.ts` runs axe-core against the landing page, agent registry and detail page, marketplace alias, task history and detail pages, wallet, and payments. The Chromium-only `frontend-accessibility` job runs on every pull request through `.github/workflows/quality-gate.yml` and blocks critical or serious WCAG 2.1 AA violations. Each scan prints the violation count, rule/impact, and affected element selectors and markup to the CI log; the Playwright report is uploaded as an artifact.
+
+The `/marketplace` route redirects to `/agents`, and `/tasks` redirects to `/tasks/history`, so automated scans exercise the corresponding implemented pages rather than the 404 view. Automated axe results complement, but do not replace, manual keyboard and screen-reader checks.
+
 ---
 
 ## Methodology

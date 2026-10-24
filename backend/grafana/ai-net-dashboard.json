@@ -19,6 +19,7 @@
   "id": null,
   "links": [],
   "liveNow": false,
+  "uid": "ai-net-overview",
   "panels": [
     {
       "title": "System Status",

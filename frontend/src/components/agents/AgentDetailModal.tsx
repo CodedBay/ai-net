@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ExternalLink, X } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'

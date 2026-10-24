@@ -79,6 +79,74 @@ resource "aws_s3_bucket_lifecycle_configuration" "redis_backups" {
   }
 }
 
+# ── SQLite Database Backups ───────────────────────────────────────────────────
+
+resource "aws_s3_bucket" "database_backups" {
+  bucket = "ai-net-${var.environment}-database-backups-${data.aws_caller_identity.current.account_id}"
+
+  tags = { Name = "ai-net-${var.environment}-database-backups" }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "database_backups" {
+  bucket = aws_s3_bucket.database_backups.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "database_backups" {
+  bucket                  = aws_s3_bucket.database_backups.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "database_backups" {
+  bucket = aws_s3_bucket.database_backups.id
+
+  rule {
+    id     = "expire-verified-database-backups"
+    status = "Enabled"
+    expiration { days = 90 }
+  }
+}
+
+resource "aws_s3_bucket" "backup_verification" {
+  bucket = "ai-net-${var.environment}-backup-verification-${data.aws_caller_identity.current.account_id}"
+
+  tags = { Name = "ai-net-${var.environment}-backup-verification" }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backup_verification" {
+  bucket = aws_s3_bucket.backup_verification.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "backup_verification" {
+  bucket                  = aws_s3_bucket.backup_verification.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "backup_verification" {
+  bucket = aws_s3_bucket.backup_verification.id
+
+  rule {
+    id     = "expire-verification-fixtures"
+    status = "Enabled"
+    expiration { days = 90 }
+  }
+}
+
 # ── Frontend Static Assets Bucket ────────────────────────────────────────────
 
 resource "aws_s3_bucket" "frontend" {

@@ -6,7 +6,7 @@ import {
 } from '../../services/reconciliation';
 import type { ReconciliationTrigger } from '../../services/reconciliation.types';
 import { createLogger } from '../../utils/logger';
-import { NotFoundError, AppError } from '../../errors';
+import { AppError } from '../../errors';
 import { validate } from '../middleware/validate';
 
 const reconciliationRunSchema = z.object({
@@ -84,14 +84,14 @@ export function createReconciliationRouter(
       return res.status(200).json(report);
     } catch (error) {
       logger.error({ err: error }, "reconciliation run failed");
-      next(new AppError('Reconciliation run failed', 500, 'INTERNAL_ERROR'));
+      next(new AppError('Reconciliation run failed', 500, 'RECONCILIATION_FAILED'));
     }
   });
 
   router.get('/report', (_req, res, next) => {
     const report = getService().getLatestReport();
     if (!report) {
-      next(new NotFoundError('Reconciliation Report'));
+      next(new AppError('No reconciliation report available', 404, 'NO_RECONCILIATION_REPORT'));
       return;
     }
     return res.status(200).json(report);

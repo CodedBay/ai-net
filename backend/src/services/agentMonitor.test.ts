@@ -205,7 +205,9 @@ describe('AgentMonitorService', () => {
     expect(monitor.getActiveControllerCount()).toBe(0);
 
     // Resolve the pending fetch so the test can finish cleanly.
-    fetchResolve?.();
+    // Cast: TS narrows the captured resolver to null at this point because the
+    // assignment happens inside the Promise executor closure.
+    (fetchResolve as (() => void) | null)?.();
     await checkPromise;
   });
 });

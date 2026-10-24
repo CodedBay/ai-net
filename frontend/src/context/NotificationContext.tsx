@@ -12,10 +12,11 @@ function loadInitialNotifications(): AppNotification[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed.map((item: any) => ({
+      return parsed.slice(0, MAX_NOTIFICATIONS).map((item: any) => ({
         ...item,
         message: item.message || item.description || '',
         description: item.description || item.message || '',
+        critical: Boolean(item.critical || item.type === 'payment_failed'),
       }));
     }
   } catch (err) {
@@ -71,6 +72,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const read = input.read ?? false;
     const msg = input.message || input.description || '';
     const desc = input.description || input.message || '';
+    const critical = input.critical ?? (input.type === 'payment_failed');
 
     const newNotification: AppNotification = {
       ...input,
@@ -79,6 +81,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       read,
       message: msg,
       description: desc,
+      critical,
     };
 
     setNotifications(prev => {
@@ -100,6 +103,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (!eventData || typeof eventData !== 'object') return;
 
     const eventType = eventData.type;
+    if (eventType === 'payment_received' || eventType === 'payment_released') {
+      window.dispatchEvent(new CustomEvent('ai-net-payment', { detail: eventData }));
+    }
     const taskId = eventData.taskId;
     const nodeId = eventData.nodeId;
     const payload = eventData.payload;
@@ -177,6 +183,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         toastType = 'success';
         break;
 
+      case 'payment_failed':
+        notification = {
+          type: 'payment_failed',
+          title: 'Payment Failed',
+          message: payload?.error || `Payment failed for task ${taskId || ''}.`,
+          description: payload?.error || `Payment failed for task ${taskId || ''}.`,
+          link: '/wallet',
+          timestamp,
+          metadata: payload,
+          critical: true,
+        };
+        toastMessage = `Payment failed for task ${taskId || ''}.`;
+        toastType = 'error';
+        break;
+
       case 'payment_locked':
         notification = {
           type: 'payment_received',
@@ -238,6 +259,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     if (notification) {
       addNotification(notification);
+
+      // Trigger vibration feedback for important notifications on mobile/supported devices
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          if (notification.type === 'payment_failed' || notification.type === 'task_failed' || notification.critical) {
+            navigator.vibrate([150, 50, 150]);
+          } else {
+            navigator.vibrate(100);
+          }
+        } catch {
+          // ignore device vibration restrictions
+        }
+      }
     }
 
     if (toastMessage) {

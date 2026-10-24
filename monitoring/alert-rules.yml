@@ -74,6 +74,16 @@ groups:
           summary: "Job queue depth is critical"
           description: "The job queue has more than 500 pending jobs (current: {{ $value }})."
 
+      # ── Database connection pools ────────────────────────────────────────
+      - alert: DatabasePoolWaitingQueueHigh
+        expr: db_pool_waiting_queue_size > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SQLite connection pool is saturated"
+          description: "Database {{ $labels.database }} has more than 5 callers waiting for a connection for 1 minute."
+
       # ── Task failures ────────────────────────────────────────────────────
       - alert: HighTaskFailureRate
         expr: |

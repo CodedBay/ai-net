@@ -39,12 +39,15 @@
 //! | `slash_bond`      | `(staking, slashed)`           | `BondSlashedEvent` |
 //! | `claim_unbonded`  | `(staking, claimed)`           | `BondClaimedEvent` |
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Bytes, Env, Symbol};
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /// 7 days at ~5s per ledger: 7 * 24 * 3600 / 5 = 120_960 ledgers.
 pub const UNBONDING_PERIOD_LEDGERS: u32 = 120_960;
+
+/// 30 ledger-days blacklist period: 30 * 24 * 3600 / 5 = 518_400 ledgers.
+pub const BLACKLIST_PERIOD_LEDGERS: u32 = 518_400;
 
 /// Default minimum stake per capability: 10 XLM in stroops.
 pub const DEFAULT_MIN_STAKE_STROOPS: i128 = 100_000_000;
@@ -65,12 +68,20 @@ pub enum DataKey {
     Admin,
     /// Destination for slashed funds.
     TreasuryAddress,
+    /// The dispute_resolution contract address — the only caller allowed to invoke `slash`.
+    DisputeResolutionContract,
+    /// The XLM/native token contract address used for treasury transfers.
+    TokenContract,
     /// Per-capability minimum stake override. Key = capability `Symbol`.
     MinStakePerCapability(Symbol),
     /// Active stake record keyed by (agent_id, capability).
     StakeRecord(Symbol, Symbol),
     /// Unbonding record keyed by (agent_id, capability).
     UnbondingRecord(Symbol, Symbol),
+    /// Blacklist record keyed by agent Address. Value = ledger seq at which ban expires.
+    Blacklist(Address),
+    /// Address+Bytes keyed stake record for the new slash() path.
+    AddressStakeRecord(Address, Bytes),
 }
 
 // ─── Data Types ──────────────────────────────────────────────────────────────
@@ -142,6 +153,18 @@ pub struct BondSlashedEvent {
     pub treasury: Address,
 }
 
+/// Emitted by `slash` when dispute_resolution slashes a specific capability bond.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CapabilitySlashedEvent {
+    pub agent_id: Address,
+    pub capability: Bytes,
+    pub slash_amount: i128,
+    pub remaining_stake: i128,
+    /// Ledger sequence at which the slash was executed.
+    pub ledger: u32,
+}
+
 /// Emitted by `claim_unbonded` when an unbonded stake is successfully claimed.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -149,6 +172,16 @@ pub struct BondClaimedEvent {
     pub agent_id: Symbol,
     pub capability: Symbol,
     pub amount_stroops: i128,
+}
+
+/// On-chain record for an active Address-keyed stake bond (used by `slash`).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AddressStakeRecord {
+    pub agent_id: Address,
+    pub capability: Bytes,
+    pub amount_stroops: i128,
+    pub staked_at: u32,
 }
 
 // ─── Error Codes ─────────────────────────────────────────────────────────────
@@ -172,6 +205,12 @@ pub enum Error {
     UnbondingPeriodNotElapsed = 6,
     /// Only the contract admin may call this function.
     Unauthorized = 7,
+    /// Only the dispute_resolution contract may call `slash`.
+    CallerNotDisputeResolution = 8,
+    /// The slash amount must be positive.
+    InvalidSlashAmount = 9,
+    /// Agent is currently blacklisted and may not stake.
+    AgentBlacklisted = 10,
 }
 
 // ─── Internal Helpers ────────────────────────────────────────────────────────
@@ -204,6 +243,20 @@ fn load_treasury(env: &Env) -> Address {
         .unwrap_or_else(|| panic!("not initialized"))
 }
 
+fn load_dispute_resolution(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::DisputeResolutionContract)
+        .unwrap_or_else(|| panic!("dispute_resolution contract not configured"))
+}
+
+fn load_token(env: &Env) -> Address {
+    env.storage()
+        .instance()
+        .get(&DataKey::TokenContract)
+        .unwrap_or_else(|| panic!("token contract not configured"))
+}
+
 // ─── Contract ────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -213,14 +266,14 @@ pub struct CapabilityStakingContract;
 impl CapabilityStakingContract {
     // ── Initialisation ──────────────────────────────────────────────────────
 
-    /// One-time initialisation. Sets the admin and treasury addresses.
+    /// One-time initialisation. Sets the admin, treasury, and token addresses.
     ///
     /// # Authorization
     /// Requires auth from `admin`.
     ///
     /// # Errors
     /// Panics with `Error::AlreadyInitialized` if called more than once.
-    pub fn initialize(env: Env, admin: Address, treasury: Address) {
+    pub fn initialize(env: Env, admin: Address, treasury: Address, token: Address) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("already initialized");
         }
@@ -229,6 +282,24 @@ impl CapabilityStakingContract {
         env.storage()
             .instance()
             .set(&DataKey::TreasuryAddress, &treasury);
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenContract, &token);
+        extend_instance_ttl(&env);
+    }
+
+    /// Admin: set the dispute_resolution contract address that is permitted to
+    /// call `slash`. This can be called after deployment once the
+    /// dispute_resolution contract is deployed.
+    ///
+    /// # Authorization
+    /// Admin only.
+    pub fn set_dispute_resolution(env: Env, contract_id: Address) {
+        let admin = load_admin(&env);
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::DisputeResolutionContract, &contract_id);
         extend_instance_ttl(&env);
     }
 
@@ -485,6 +556,135 @@ impl CapabilityStakingContract {
         );
     }
 
+    /// Slash a specific capability bond. May only be called by the configured
+    /// dispute_resolution contract (verified via cross-contract caller check).
+    ///
+    /// Behaviour:
+    /// - Deducts `slash_amount` from the agent's active stake for `capability`.
+    /// - If `slash_amount >= staked amount`, the full bond is taken, the
+    ///   capability stake record is removed, and the agent is blacklisted for
+    ///   30 ledger-days (BLACKLIST_PERIOD_LEDGERS).
+    /// - Slashed funds are transferred to the treasury via the native token
+    ///   contract.
+    /// - Emits `capability_slashed { agent_id, capability, slash_amount,
+    ///   remaining_stake, ledger }`.
+    ///
+    /// # Authorization
+    /// Caller must be the dispute_resolution contract address stored in
+    /// `DataKey::DisputeResolutionContract`. Any other caller panics with
+    /// `Error::CallerNotDisputeResolution`.
+    ///
+    /// # Errors
+    /// - Panics with `Error::CallerNotDisputeResolution` when called by anyone
+    ///   other than the configured dispute_resolution contract.
+    /// - Panics with `Error::InvalidSlashAmount` when `slash_amount <= 0`.
+    /// - Panics with `Error::StakeNotFound` when no active stake exists for
+    ///   the (agent_id, capability) pair.
+    pub fn slash(
+        env: Env,
+        agent_id: Address,
+        capability: Bytes,
+        slash_amount: i128,
+        reason: Bytes,
+    ) {
+        // ── Caller verification ──────────────────────────────────────────────
+        let dr_contract = load_dispute_resolution(&env);
+        // The dispute_resolution contract must authorise this call via
+        // `env.current_contract_address()` in its own invocation context.
+        // We verify the invoker is the dispute_resolution contract.
+        dr_contract.require_auth();
+
+        if slash_amount <= 0 {
+            panic!("invalid slash amount");
+        }
+
+        let treasury = load_treasury(&env);
+        let token_id = load_token(&env);
+        let current_ledger = env.ledger().sequence();
+
+        // ── Convert Bytes capability key to Symbol for storage lookup ────────
+        // Stake records are keyed by Symbol; we derive a lookup key from the
+        // raw Bytes by interpreting up to 9 ASCII bytes as a symbol.
+        // For the slash path we search using a dedicated Address-keyed store.
+        // Because the existing StakeRecord keys use (Symbol, Symbol) we store
+        // the address-based record under a separate compound key using the
+        // agent Address as the first component.
+        //
+        // We use DataKey::Blacklist(agent_id) which takes Address — reuse that
+        // address in a second lookup key form for the stake:
+        // DataKey::StakeRecord stores (Symbol, Symbol). We need to support the
+        // new Address-based slash path separately.
+        //
+        // Implementation: look up stake by iterating known patterns or store
+        // address-keyed stakes. Since the current StakeRecord key is
+        // (Symbol, Symbol) and the new slash() takes Address + Bytes, we store
+        // an Address+Bytes keyed stake under a new DataKey variant:
+        // AddressStakeRecord(Address, Bytes).
+        //
+        // However, to avoid a breaking storage migration we also check if
+        // there is a matching record under the legacy (Symbol, Symbol) key.
+        // For new stakers the agent owner is tracked via AddressStakeRecord.
+
+        let addr_key = DataKey::AddressStakeRecord(agent_id.clone(), capability.clone());
+        let stake_opt: Option<AddressStakeRecord> = env
+            .storage()
+            .persistent()
+            .get(&addr_key);
+
+        let record = stake_opt.unwrap_or_else(|| panic!("stake not found"));
+
+        let actual_slash = if slash_amount >= record.amount_stroops {
+            record.amount_stroops
+        } else {
+            slash_amount
+        };
+        let remaining = record.amount_stroops - actual_slash;
+
+        if remaining == 0 {
+            // Full slash: remove record and blacklist agent for 30 ledger-days.
+            env.storage().persistent().remove(&addr_key);
+
+            let blacklist_expires = current_ledger + BLACKLIST_PERIOD_LEDGERS;
+            let bl_key = DataKey::Blacklist(agent_id.clone());
+            env.storage()
+                .persistent()
+                .set(&bl_key, &blacklist_expires);
+            extend_persistent_ttl(&env, &bl_key);
+        } else {
+            // Partial slash: update the stake record.
+            let updated = AddressStakeRecord {
+                amount_stroops: remaining,
+                ..record
+            };
+            env.storage().persistent().set(&addr_key, &updated);
+            extend_persistent_ttl(&env, &addr_key);
+        }
+
+        // Transfer slashed funds to treasury via the token contract.
+        token::Client::new(&env, &token_id).transfer(
+            &env.current_contract_address(),
+            &treasury,
+            &actual_slash,
+        );
+
+        extend_instance_ttl(&env);
+
+        // Emit event.
+        env.events().publish(
+            (symbol_short!("staking"), symbol_short!("cap_slshd")),
+            CapabilitySlashedEvent {
+                agent_id,
+                capability,
+                slash_amount: actual_slash,
+                remaining_stake: remaining,
+                ledger: current_ledger,
+            },
+        );
+
+        // Suppress unused warning on reason — stored in event for off-chain indexers.
+        let _ = reason;
+    }
+
     // ── Queries ─────────────────────────────────────────────────────────────
 
     /// Returns the active `StakeRecord` for an (agent_id, capability) pair, or
@@ -534,6 +734,21 @@ impl CapabilityStakingContract {
             .get::<DataKey, StakeRecord>(&DataKey::StakeRecord(agent_id, capability))
         {
             Some(record) => record.amount_stroops >= min_stake,
+            None => false,
+        }
+    }
+
+    /// Returns `true` if `agent_id` is currently blacklisted (i.e. their
+    /// blacklist has not yet expired), `false` otherwise.
+    pub fn is_blacklisted(env: Env, agent_id: Address) -> bool {
+        extend_instance_ttl(&env);
+        let key = DataKey::Blacklist(agent_id);
+        match env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&key)
+        {
+            Some(expires_at) => env.ledger().sequence() < expires_at,
             None => false,
         }
     }

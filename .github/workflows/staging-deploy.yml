@@ -57,6 +57,11 @@ jobs:
     needs: check-trigger
     if: needs.check-trigger.outputs.should-deploy == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      issues: write
     timeout-minutes: 40
     # All staging secrets live in the `staging` environment so they are
     # isolated from repo-level secrets and can be rotated independently.
@@ -183,6 +188,96 @@ jobs:
             echo "container-deploy=success" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check CloudFront deployment configuration
+        id: cdn-config
+        env:
+          FRONTEND_BUCKET: ${{ vars.STAGING_FRONTEND_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.STAGING_CLOUDFRONT_DISTRIBUTION_ID }}
+          AWS_ROLE_ARN: ${{ vars.STAGING_AWS_ROLE_ARN }}
+        run: |
+          configured=0
+          for value in "$FRONTEND_BUCKET" "$CLOUDFRONT_DISTRIBUTION_ID" "$AWS_ROLE_ARN"; do
+            [[ -n "$value" ]] && ((configured += 1))
+          done
+
+          if [[ "$configured" == "0" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CloudFront static deployment skipped; configure STAGING_FRONTEND_BUCKET, STAGING_CLOUDFRONT_DISTRIBUTION_ID, and STAGING_AWS_ROLE_ARN to enable it."
+          elif [[ "$configured" != "3" ]]; then
+            echo "::error::CloudFront deployment requires all three staging variables: STAGING_FRONTEND_BUCKET, STAGING_CLOUDFRONT_DISTRIBUTION_ID, and STAGING_AWS_ROLE_ARN."
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js for static frontend deployment
+        if: steps.cdn-config.outputs.enabled == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build static frontend
+        if: steps.cdn-config.outputs.enabled == 'true'
+        working-directory: frontend
+        run: npm install && npm run build
+
+      - name: Configure AWS credentials
+        if: steps.cdn-config.outputs.enabled == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.STAGING_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload frontend and invalidate changed CloudFront paths
+        if: steps.cdn-config.outputs.enabled == 'true'
+        id: cdn-invalidation
+        env:
+          FRONTEND_BUCKET: ${{ vars.STAGING_FRONTEND_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.STAGING_CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+
+          asset_output=$(aws s3 sync frontend/dist/assets/ "s3://${FRONTEND_BUCKET}/assets/" \
+            --cache-control "public,max-age=31536000,immutable" --no-progress)
+          printf '%s\n' "$asset_output"
+
+          other_output=$(aws s3 sync frontend/dist/ "s3://${FRONTEND_BUCKET}/" \
+            --exclude "assets/*" --exclude "index.html" --exclude "404.html" \
+            --cache-control "no-cache" --no-progress)
+          printf '%s\n' "$other_output"
+
+          aws s3 cp frontend/dist/index.html "s3://${FRONTEND_BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" --content-type "text/html" --no-progress
+          if [[ -f frontend/dist/404.html ]]; then
+            aws s3 cp frontend/dist/404.html "s3://${FRONTEND_BUCKET}/404.html" \
+              --cache-control "no-cache,no-store,must-revalidate" --content-type "text/html" --no-progress
+          fi
+
+          paths=(/index.html /404.html)
+          declare -A seen_paths=( ["/index.html"]=1 ["/404.html"]=1 )
+          while IFS= read -r s3_uri; do
+            [[ -n "$s3_uri" ]] || continue
+            path="/${s3_uri#s3://${FRONTEND_BUCKET}/}"
+            if [[ -z "${seen_paths[$path]+x}" ]]; then
+              paths+=("$path")
+              seen_paths["$path"]=1
+            fi
+          done < <(printf '%s\n%s\n' "$asset_output" "$other_output" | awk '$1 == "upload:" && $3 == "to" { print $4 }')
+
+          start_time=$(date +%s)
+          invalidation_id=$(aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "${paths[@]}" --query 'Invalidation.Id' --output text)
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$invalidation_id"
+          duration=$(( $(date +%s) - start_time ))
+
+          echo "invalidation-id=$invalidation_id" >> "$GITHUB_OUTPUT"
+          echo "duration-seconds=$duration" >> "$GITHUB_OUTPUT"
+          echo "::notice title=CloudFront invalidation::${invalidation_id} completed in ${duration}s for ${#paths[@]} paths"
+
       # ── Smoke tests ─────────────────────────────────────────────────────────
       - name: Wait for services to become ready
         run: sleep 15
@@ -231,6 +326,7 @@ jobs:
             echo "| Backend image | \`${{ steps.build-backend.outputs.imageid }}\` |"
             echo "| Contract deploy | ${{ steps.deploy-contracts.outcome }} |"
             echo "| Container deploy | ${{ steps.deploy-containers.outputs.container-deploy }} |"
+            echo "| CloudFront invalidation | ${{ steps.cdn-invalidation.outputs.duration-seconds || 'not configured' }} seconds |"
             echo "| Staging URL | ${{ vars.STAGING_FRONTEND_URL || 'http://localhost:5173' }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -25,7 +25,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read # to download the previous successful benchmark baseline
   contents: read
+  id-token: write # to publish nightly metrics to AWS using GitHub OIDC
   issues: write # to open/comment on breakage issues
 
 jobs:
@@ -38,6 +40,8 @@ jobs:
       CARGO_BUILD_JOBS: "1"
       RUSTFLAGS: "-C codegen-units=1"
       CARGO_INCREMENTAL: "0"
+      GAS_BENCHMARKS_AWS_ROLE_ARN: ${{ secrets.GAS_BENCHMARKS_AWS_ROLE_ARN }}
+      GAS_BENCHMARKS_S3_BUCKET: ${{ secrets.GAS_BENCHMARKS_S3_BUCKET }}
     defaults:
       run:
         working-directory: smart-contracts
@@ -68,6 +72,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Download previous successful gas baseline
+        if: github.event_name != 'pull_request'
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: testnet-nightly.yml
+          branch: main
+          name: gas-benchmark-baseline
+          path: gas-baseline
+          if_no_artifact_found: warn
 
       # ── Guard: only run when secrets are configured ────────────────────
       - name: Verify farm secrets present
@@ -111,6 +125,66 @@ jobs:
             smart-contracts/testnet-farm-output/gas-measurements.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Compare measured gas with baseline
+        if: success() && env.configured == 'true'
+        run: |
+          node scripts/compare-gas.js \
+            testnet-farm-output/gas-measurements.json \
+            ../gas-baseline/gas-measurements.json \
+            testnet-farm-output/gas-comparison.json
+
+      - name: Upload gas comparison report and refreshed baseline
+        if: always() && env.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-benchmark-comparison
+          path: |
+            smart-contracts/testnet-farm-output/gas-comparison.json
+            smart-contracts/testnet-farm-output/gas-comparison.md
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload refreshed gas baseline
+        if: success() && env.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-benchmark-baseline
+          path: smart-contracts/testnet-farm-output/gas-measurements.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Configure AWS credentials for nightly metrics
+        if: success() && github.event_name == 'schedule' && env.configured == 'true' && env.GAS_BENCHMARKS_AWS_ROLE_ARN != '' && env.GAS_BENCHMARKS_S3_BUCKET != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.GAS_BENCHMARKS_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.GAS_BENCHMARKS_AWS_REGION || 'us-east-1' }}
+
+      - name: Store nightly gas metrics in S3 and CloudWatch
+        if: success() && github.event_name == 'schedule' && env.configured == 'true' && env.GAS_BENCHMARKS_AWS_ROLE_ARN != '' && env.GAS_BENCHMARKS_S3_BUCKET != ''
+        run: |
+          date_partition="$(date -u +'%Y/%m/%d')"
+          aws s3 cp testnet-farm-output/gas-comparison.json \
+            "s3://${GAS_BENCHMARKS_S3_BUCKET}/gas-benchmarks/${date_partition}/${GITHUB_SHA}.json"
+          node -e '
+            const fs = require("node:fs");
+            const { execFileSync } = require("node:child_process");
+            const report = JSON.parse(fs.readFileSync("testnet-farm-output/gas-comparison.json", "utf8"));
+            for (const result of report.results) {
+              execFileSync("aws", [
+                "cloudwatch", "put-metric-data",
+                "--namespace", "AiNet/SmartContracts",
+                "--metric-data", JSON.stringify([{
+                  MetricName: "CpuInstructions",
+                  Dimensions: [{ Name: "Operation", Value: result.operation }],
+                  Timestamp: new Date().toISOString(),
+                  Value: Number(result.current_cpu_insns),
+                  Unit: "Count"
+                }])
+              ], { stdio: "inherit" });
+            }
+          '
 
       # ── Page maintainers on breakage ────────────────────────────────────
       - name: Open / update breakage issue on failure

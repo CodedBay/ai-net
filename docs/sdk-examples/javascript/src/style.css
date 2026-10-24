@@ -1,0 +1,50 @@
+:root {
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  color: #18211f;
+  background: #f1f4ef;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background-image: linear-gradient(135deg, #f1f4ef, #e6eeeb 60%, #edf0e5);
+}
+
+main {
+  width: min(760px, calc(100% - 32px));
+  margin: 40px auto;
+}
+
+header, section {
+  border-top: 1px solid #aebbb4;
+  padding: 22px 0;
+}
+
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #2d6559; }
+h1 { font-size: 36px; margin: 8px 0 20px; }
+h2 { font-size: 19px; margin-top: 0; }
+
+button {
+  border: 0;
+  border-radius: 3px;
+  padding: 10px 14px;
+  color: white;
+  background: #176b58;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { background: #104e41; }
+label { display: block; margin-bottom: 8px; }
+textarea { display: block; width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #879991; border-radius: 3px; font: inherit; }
+pre { overflow-wrap: anywhere; white-space: pre-wrap; padding: 12px; background: #e2e9e5; border-left: 3px solid #cf682d; }
+li { margin: 8px 0; overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  main { margin: 20px auto; }
+  h1 { font-size: 30px; }
+}

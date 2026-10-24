@@ -53,6 +53,7 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => {
     isOpen,
     currentStep,
     totalSteps,
+    start,
     nextStep,
     prevStep,
     skip,
@@ -68,6 +69,17 @@ const OnboardingModal: React.FC<OnboardingModalProps> = ({ onClose }) => {
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
   const [permanentDismiss, setPermanentDismiss] = useState(false)
+
+  useEffect(() => {
+    const handleStart = () => start()
+    const handleSkip = () => dismiss(true)
+    window.addEventListener('ai-net-start-onboarding', handleStart)
+    window.addEventListener('ai-net-skip-onboarding', handleSkip)
+    return () => {
+      window.removeEventListener('ai-net-start-onboarding', handleStart)
+      window.removeEventListener('ai-net-skip-onboarding', handleSkip)
+    }
+  }, [dismiss, start])
 
   // Focus trap — active whenever the modal is open
   const trapRef = useFocusTrap<HTMLDivElement>(isOpen)

@@ -1,4 +1,4 @@
-import React, { useState, useId } from 'react';
+import { useState, useId } from 'react';
 import { HelpCircle } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { Tooltip } from './Tooltip';

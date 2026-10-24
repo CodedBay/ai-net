@@ -1,0 +1,37 @@
+[package]
+name = "agent-registry-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+agent_registry = { path = "..", features = [] }
+soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+
+[[bin]]
+name = "fuzz_register_agent"
+path = "src/fuzz_register_agent.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_agent_bond"
+path = "src/fuzz_agent_bond.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_agent_id_inputs"
+path = "src/fuzz_agent_id_inputs.rs"
+test = false
+doc = false
+
+[profile.release]
+debug = 1
+
+[profile.dev]
+opt-level = 1

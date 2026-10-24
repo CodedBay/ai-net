@@ -10,6 +10,26 @@ const envSchema = z.object({
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
 
+  // ── Per-module log level overrides (Issue #404) ───────────────────────────
+  // Format: LOG_LEVEL_<MODULE>=<level>  e.g. LOG_LEVEL_WORKER=debug
+  // These are read dynamically by logger.ts; we expose them here so the config
+  // snapshot captures them and they appear in env validation feedback.
+  LOG_LEVEL_WORKER: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .optional(),
+  LOG_LEVEL_AGENTCLEANUP: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .optional(),
+  LOG_LEVEL_COORDINATOR: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .optional(),
+  LOG_LEVEL_PAYMENT: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .optional(),
+  LOG_LEVEL_REGISTRY: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .optional(),
+
   STELLAR_NETWORK: z.enum(["testnet", "mainnet", "local", "futurenet"]).default("testnet"),
   STELLAR_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
   STELLAR_HORIZON: z.string().url().optional(),
@@ -92,7 +112,7 @@ const envSchema = z.object({
   /** JWT secret key used to sign and verify access tokens. */
   AUTH_JWT_SECRET: z.string().default("ai-net-default-auth-secret-change-in-production"),
   /** Access token validity in seconds. Default: 900 (15 min). */
-  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
   /** Refresh token sliding expiry validity in seconds. Default: 604 800 (7 days). */
   AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
   /** Max absolute session lifetime in seconds. Default: 2 592 000 (30 days). */

@@ -60,6 +60,8 @@ export interface UseOnboardingReturn {
   isCompleted: boolean
   /** Advance to the next step. */
   nextStep: () => void
+  /** Start the guided tour after the welcome screen. */
+  start: () => void
   /** Go back to the previous step. */
   prevStep: () => void
   /** Jump to a specific step. */
@@ -87,9 +89,17 @@ export function useOnboarding(): UseOnboardingReturn {
     readInt(KEYS.step, 1),
   )
   // isOpen: show unless dismissed or already completed (and not re-opened)
-  const [isOpen, setIsOpen] = useState(
-    () => !readBool(KEYS.dismissed) && !readBool(KEYS.completed),
-  )
+  const [isOpen, setIsOpen] = useState(() => {
+    const hasSavedProgress = readInt(KEYS.step, 0) > 0
+    let hasStarted = false
+    try { hasStarted = localStorage.getItem('onboarding_started') === 'true' } catch { /* Storage unavailable. */ }
+    return !readBool(KEYS.dismissed) && !readBool(KEYS.completed) && (hasStarted || hasSavedProgress)
+  })
+
+  const start = useCallback(() => {
+    setIsOpen(true)
+    persist('onboarding_started', 'true')
+  }, [])
 
   const nextStep = useCallback(() => {
     setCurrentStep((prev) => {
@@ -140,6 +150,7 @@ export function useOnboarding(): UseOnboardingReturn {
     isOpen,
     currentStep,
     totalSteps: ONBOARDING_TOTAL_STEPS,
+    start,
     isDismissed,
     isCompleted,
     nextStep,

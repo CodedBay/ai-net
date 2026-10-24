@@ -7,7 +7,6 @@ import {
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
 import { aggregateDailySpend, aggregateByCounterparty } from '../../hooks/useTransactionHistory'
 import { formatDate } from '../../utils/format'
-import { useTheme } from '../../hooks/useTheme'
 import styles from './PaymentChart.module.css'
 import { AccessibleChart } from '../common/AccessibleChart'
 
@@ -28,10 +27,8 @@ interface AgentSpendSlicePayload {
 
 export function PaymentChart({ transactions }: PaymentChartProps) {
   const { t, i18n } = useTranslation()
-  const { effectiveTheme } = useTheme()
   const [legendOpen, setLegendOpen] = useState(true)
 
-  const SLICE_COLORS = effectiveTheme === 'dark' ? DARK_COLORS : LIGHT_COLORS
   const gridStroke = 'var(--border-color)'
   const textColor = 'var(--text-primary)'
 

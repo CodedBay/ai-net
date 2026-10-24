@@ -2,6 +2,9 @@ import { onChainContracts, resetTestDatabase } from "./helpers";
 import { closeAgentDb } from "../../backend/src/db/agents";
 import { closeTaskDb } from "../../backend/src/db/tasks";
 
+// Rate-limit ceilings are raised in tests/e2e/env.ts (Jest `setupFiles`), which
+// runs before helpers.ts → createApp loads the limiter singletons.
+
 // Close better-sqlite3 handles before process exit to prevent
 // `Assertion failed: (env) != nullptr` SIGABRT on Node 24.
 process.on('exit', () => {

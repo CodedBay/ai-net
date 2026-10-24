@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests/load/**"
+      - ".github/workflows/load-tests.yml"
 
 permissions:
   contents: read
@@ -11,7 +15,7 @@ permissions:
 jobs:
   load-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -33,15 +37,56 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: Run scenarios and export percentile summaries
+      - name: Run general load scenarios and export percentile summaries
         env:
           BASE_URL: http://localhost:3000
         run: |
           mkdir -p reports/load
           k6 run --summary-export reports/load/get-agents.json tests/load/scenarios/get-agents.js
           k6 run --summary-export reports/load/submit-tasks.json tests/load/scenarios/submit-tasks.js
-          k6 run --summary-export reports/load/websocket-subscribers.json tests/load/scenarios/websocket-subscribers.js
           k6 run --summary-export reports/load/poll-task.json tests/load/scenarios/poll-task.js
+
+      # ── WebSocket stress scenarios (issue #460) ────────────────────────────
+      # Run each WebSocket scenario individually so failures are reported per
+      # scenario and k6 thresholds are evaluated independently.
+
+      - name: WS stress — sustained load (500 VUs × 5 min)
+        env:
+          WS_URL: ws://localhost:3000/ws/tasks
+        run: |
+          k6 run \
+            -e SCENARIO=sustained_load \
+            --summary-export reports/load/ws-sustained-load.json \
+            tests/load/scenarios/websocket-subscribers.js
+
+      - name: WS stress — message ordering verification
+        env:
+          WS_URL: ws://localhost:3000/ws/tasks
+        run: |
+          k6 run \
+            -e SCENARIO=message_ordering \
+            --summary-export reports/load/ws-message-ordering.json \
+            tests/load/scenarios/websocket-subscribers.js
+
+      - name: WS stress — reconnection test (≤ 10 s)
+        env:
+          WS_URL: ws://localhost:3000/ws/tasks
+          MAX_RECONNECT_WAIT: "10"
+        run: |
+          k6 run \
+            -e SCENARIO=reconnection \
+            --summary-export reports/load/ws-reconnection.json \
+            tests/load/scenarios/websocket-subscribers.js
+
+      - name: WS stress — heartbeat keep-alive (every 15 s)
+        env:
+          WS_URL: ws://localhost:3000/ws/tasks
+          HEARTBEAT_INTERVAL: "15"
+        run: |
+          k6 run \
+            -e SCENARIO=heartbeat \
+            --summary-export reports/load/ws-heartbeat.json \
+            tests/load/scenarios/websocket-subscribers.js
 
       - name: Upload load-test summaries
         if: always()

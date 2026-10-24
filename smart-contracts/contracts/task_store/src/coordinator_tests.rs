@@ -19,6 +19,7 @@ use soroban_sdk::{
 struct CoordFixture {
     env: Env,
     client: TaskStoreContractClient<'static>,
+    #[allow(dead_code)]
     admin: Address,
     coordinator: Address,
     task_id: BytesN<32>,
@@ -99,7 +100,10 @@ fn test_set_coordinator_requires_admin() {
     let f = fixture();
     // With mock_all_auths this always passes, but the call must succeed.
     let result = f.client.try_set_coordinator(&f.coordinator);
-    assert!(result.is_ok(), "set_coordinator should succeed for admin: {result:?}");
+    assert!(
+        result.is_ok(),
+        "set_coordinator should succeed for admin: {result:?}"
+    );
 }
 
 #[test]
@@ -134,7 +138,10 @@ fn test_coordinator_can_assign_task() {
 
     // Coordinator assigns task to agent.
     let result = f.client.try_assign_task(&f.task_id, &f.agent);
-    assert!(result.is_ok(), "coordinator should be able to assign task: {result:?}");
+    assert!(
+        result.is_ok(),
+        "coordinator should be able to assign task: {result:?}"
+    );
 
     // Task must now be Running.
     assert_eq!(
@@ -181,10 +188,12 @@ fn test_coordinator_can_fail_task_from_pending() {
     f.client.set_coordinator(&f.coordinator);
     store_task(&f);
 
-    let reason =
-        soroban_sdk::String::from_str(&f.env, "agent unavailable");
+    let reason = soroban_sdk::String::from_str(&f.env, "agent unavailable");
     let result = f.client.try_fail_task(&f.task_id, &reason);
-    assert!(result.is_ok(), "coordinator should be able to fail a pending task: {result:?}");
+    assert!(
+        result.is_ok(),
+        "coordinator should be able to fail a pending task: {result:?}"
+    );
 
     assert_eq!(
         f.client.get_task_status(&f.task_id),
@@ -205,7 +214,10 @@ fn test_coordinator_can_fail_task_from_running() {
 
     let reason = soroban_sdk::String::from_str(&f.env, "timeout");
     let result = f.client.try_fail_task(&f.task_id, &reason);
-    assert!(result.is_ok(), "coordinator should be able to fail a running task: {result:?}");
+    assert!(
+        result.is_ok(),
+        "coordinator should be able to fail a running task: {result:?}"
+    );
 
     assert_eq!(
         f.client.get_task_status(&f.task_id),
@@ -237,13 +249,18 @@ fn test_release_funds_on_completed_task_succeeds() {
     store_task(&f);
 
     // Drive task to Completed via update_task_status.
-    f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
-    f.client.update_task_status(&f.task_id, &f.agent, &TaskStatus::Completed);
+    f.client
+        .update_task_status(&f.task_id, &f.agent, &TaskStatus::Running);
+    f.client
+        .update_task_status(&f.task_id, &f.agent, &TaskStatus::Completed);
 
     assert_eq!(f.client.get_task_status(&f.task_id), TaskStatus::Completed);
 
     let result = f.client.try_release_funds(&f.task_id);
-    assert!(result.is_ok(), "coordinator should be able to release funds on a completed task: {result:?}");
+    assert!(
+        result.is_ok(),
+        "coordinator should be able to release funds on a completed task: {result:?}"
+    );
 }
 
 #[test]

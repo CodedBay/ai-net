@@ -36,7 +36,7 @@ fn setup() -> (Env, PaymentEscrowContractClient<'static>, Address) {
     let client = PaymentEscrowContractClient::new(&env, &contract_id);
     let coordinator = Address::generate(&env);
 
-    client.initialize(&coordinator).unwrap();
+    client.initialize(&coordinator);
     (env, client, coordinator)
 }
 
@@ -63,16 +63,15 @@ fn test_initialize_sets_coordinator() {
     let coordinator = Address::generate(&env);
 
     // First initialization should succeed.
-    let result = client.initialize(&coordinator);
-    assert!(result.is_ok(), "initialize should succeed");
+    client.initialize(&coordinator);
 }
 
 #[test]
 fn test_initialize_cannot_be_called_twice() {
     let (_, client, coord) = setup();
     // Second call should fail with AlreadyLocked (reused as "already initialized").
-    let result = client.initialize(&coord);
-    assert_eq!(result.unwrap_err(), Error::AlreadyLocked);
+    let result = client.try_initialize(&coord);
+    assert_eq!(result, Err(Ok(Error::AlreadyLocked)));
 }
 
 // ── lock_funds ────────────────────────────────────────────────────────────────
@@ -83,19 +82,17 @@ fn test_lock_funds_happy_path() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    let result = client.lock_funds(
+    client.lock_funds(
         &sym(&env, "task001"),
         &sym(&env, "nodeA"),
         &submitter,
         &agent,
         &1_000_000_i128,
     );
-    assert!(result.is_ok(), "lock_funds should succeed");
 
     // Verify the escrow record is stored with the correct amount.
     let record: EscrowRecord = client
-        .get_escrow(&sym(&env, "task001"), &sym(&env, "nodeA"))
-        .unwrap();
+        .get_escrow(&sym(&env, "task001"), &sym(&env, "nodeA"));
     assert_eq!(record.amount, 1_000_000_i128);
     assert_eq!(record.submitter, submitter);
     assert_eq!(record.agent, agent);
@@ -109,19 +106,16 @@ fn test_lock_funds_records_correct_expiry() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "task002"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &500_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "task002"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &500_000_i128,
+    );
 
     let record = client
-        .get_escrow(&sym(&env, "task002"), &sym(&env, "nodeA"))
-        .unwrap();
+        .get_escrow(&sym(&env, "task002"), &sym(&env, "nodeA"));
     assert_eq!(record.locked_at, now);
     assert_eq!(record.expires_at, now + ESCROW_TIMEOUT_SECS);
 }
@@ -136,10 +130,9 @@ fn test_lock_funds_unauthorized_caller_rejected() {
     // Initialize with mock_all_auths temporarily.
     env.mock_all_auths();
     let coordinator = Address::generate(&env);
-    client.initialize(&coordinator).unwrap();
+    client.initialize(&coordinator);
 
     // Now try lock_funds without mocking coordinator auth — should panic/auth fail.
-    // We use try_lock_funds which returns a Result instead of panicking.
     let non_coordinator = Address::generate(&env);
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
@@ -163,20 +156,14 @@ fn test_lock_funds_unauthorized_caller_rejected() {
         },
     }]);
 
-    // This must panic because coordinator auth is required, not non_coordinator auth.
-    // We verify the contract enforces coordinator.require_auth() by testing
-    // that the contract panics when the coordinator hasn't authorized.
-    // Using try_ prefix is a soroban testutils pattern.
-    let result = std::panic::catch_unwind(|| {
-        let _ = client.lock_funds(
-            &sym(&env, "task003"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &500_i128,
-        );
-    });
-    assert!(result.is_err(), "lock_funds should panic when coordinator auth is not provided");
+    let result = client.try_lock_funds(
+        &sym(&env, "task003"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &500_i128,
+    );
+    assert!(result.is_err(), "lock_funds should fail when coordinator auth is not provided");
 }
 
 #[test]
@@ -185,25 +172,23 @@ fn test_lock_funds_duplicate_lock_rejected() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "task004"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
-
-    // Second lock for the same (task, node) must fail.
-    let result = client.lock_funds(
+    client.lock_funds(
         &sym(&env, "task004"),
         &sym(&env, "nodeA"),
         &submitter,
         &agent,
         &1_000_i128,
     );
-    assert_eq!(result.unwrap_err(), Error::AlreadyLocked);
+
+    // Second lock for the same (task, node) must fail.
+    let result = client.try_lock_funds(
+        &sym(&env, "task004"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
+    assert_eq!(result, Err(Ok(Error::AlreadyLocked)));
 }
 
 #[test]
@@ -212,14 +197,14 @@ fn test_lock_funds_zero_amount_rejected() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    let result = client.lock_funds(
+    let result = client.try_lock_funds(
         &sym(&env, "task005"),
         &sym(&env, "nodeA"),
         &submitter,
         &agent,
         &0_i128,
     );
-    assert_eq!(result.unwrap_err(), Error::InvalidAmount);
+    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 }
 
 #[test]
@@ -228,14 +213,14 @@ fn test_lock_funds_negative_amount_rejected() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    let result = client.lock_funds(
+    let result = client.try_lock_funds(
         &sym(&env, "task_neg"),
         &sym(&env, "nodeA"),
         &submitter,
         &agent,
         &-100_i128,
     );
-    assert_eq!(result.unwrap_err(), Error::InvalidAmount);
+    assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 }
 
 // ── release_funds ─────────────────────────────────────────────────────────────
@@ -246,28 +231,22 @@ fn test_release_funds_happy_path() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "task006"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &2_000_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "task006"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &2_000_000_i128,
+    );
 
-    let record = client
-        .release_funds(&sym(&env, "task006"), &sym(&env, "nodeA"))
-        .unwrap();
+    let record = client.release_funds(&sym(&env, "task006"), &sym(&env, "nodeA"));
 
     assert_eq!(record.amount, 2_000_000_i128);
     assert_eq!(record.agent, agent);
     assert_eq!(record.status, EscrowStatus::Released);
 
     // Verify persisted state.
-    let stored = client
-        .get_escrow(&sym(&env, "task006"), &sym(&env, "nodeA"))
-        .unwrap();
+    let stored = client.get_escrow(&sym(&env, "task006"), &sym(&env, "nodeA"));
     assert_eq!(stored.status, EscrowStatus::Released);
 }
 
@@ -279,19 +258,17 @@ fn test_release_funds_non_coordinator_rejected() {
 
     env.mock_all_auths();
     let coordinator = Address::generate(&env);
-    client.initialize(&coordinator).unwrap();
+    client.initialize(&coordinator);
 
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
-    client
-        .lock_funds(
-            &sym(&env, "task007"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "task007"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
 
     // Mock auth for a non-coordinator account.
     let attacker = Address::generate(&env);
@@ -305,17 +282,15 @@ fn test_release_funds_non_coordinator_rejected() {
         },
     }]);
 
-    let result = std::panic::catch_unwind(|| {
-        let _ = client.release_funds(&sym(&env, "task007"), &sym(&env, "nodeA"));
-    });
-    assert!(result.is_err(), "release_funds should panic when non-coordinator tries to release");
+    let result = client.try_release_funds(&sym(&env, "task007"), &sym(&env, "nodeA"));
+    assert!(result.is_err(), "release_funds should fail when non-coordinator tries to release");
 }
 
 #[test]
 fn test_release_funds_not_found_returns_error() {
     let (env, client, _coord) = setup();
-    let result = client.release_funds(&sym(&env, "nonexistent"), &sym(&env, "nodeA"));
-    assert_eq!(result.unwrap_err(), Error::NotFound);
+    let result = client.try_release_funds(&sym(&env, "nonexistent"), &sym(&env, "nodeA"));
+    assert_eq!(result, Err(Ok(Error::NotFound)));
 }
 
 // ── refund_funds ──────────────────────────────────────────────────────────────
@@ -326,28 +301,22 @@ fn test_refund_funds_happy_path() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "task008"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &3_000_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "task008"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &3_000_000_i128,
+    );
 
-    let record = client
-        .refund_funds(&sym(&env, "task008"), &sym(&env, "nodeA"))
-        .unwrap();
+    let record = client.refund_funds(&sym(&env, "task008"), &sym(&env, "nodeA"));
 
     assert_eq!(record.amount, 3_000_000_i128);
     assert_eq!(record.submitter, submitter);
     assert_eq!(record.status, EscrowStatus::Refunded);
 
     // Verify persisted state.
-    let stored = client
-        .get_escrow(&sym(&env, "task008"), &sym(&env, "nodeA"))
-        .unwrap();
+    let stored = client.get_escrow(&sym(&env, "task008"), &sym(&env, "nodeA"));
     assert_eq!(stored.status, EscrowStatus::Refunded);
 }
 
@@ -359,19 +328,17 @@ fn test_refund_funds_non_coordinator_rejected_before_timeout() {
 
     env.mock_all_auths();
     let coordinator = Address::generate(&env);
-    client.initialize(&coordinator).unwrap();
+    client.initialize(&coordinator);
 
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
-    client
-        .lock_funds(
-            &sym(&env, "task009"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "task009"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
 
     // Provide auth for a random non-coordinator address — must be rejected.
     let attacker = Address::generate(&env);
@@ -385,17 +352,15 @@ fn test_refund_funds_non_coordinator_rejected_before_timeout() {
         },
     }]);
 
-    let result = std::panic::catch_unwind(|| {
-        let _ = client.refund_funds(&sym(&env, "task009"), &sym(&env, "nodeA"));
-    });
-    assert!(result.is_err(), "refund_funds should panic when non-coordinator calls before timeout");
+    let result = client.try_refund_funds(&sym(&env, "task009"), &sym(&env, "nodeA"));
+    assert!(result.is_err(), "refund_funds should fail when non-coordinator calls before timeout");
 }
 
 #[test]
 fn test_refund_funds_not_found_returns_error() {
     let (env, client, _coord) = setup();
-    let result = client.refund_funds(&sym(&env, "nonexistent"), &sym(&env, "nodeA"));
-    assert_eq!(result.unwrap_err(), Error::NotFound);
+    let result = client.try_refund_funds(&sym(&env, "nonexistent"), &sym(&env, "nodeA"));
+    assert_eq!(result, Err(Ok(Error::NotFound)));
 }
 
 // ── Timeout behavior ──────────────────────────────────────────────────────────
@@ -406,28 +371,18 @@ fn test_auto_refund_after_timeout_no_auth_required() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskTimeout"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskTimeout"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_000_i128,
+    );
 
     // Advance time past the 7-day timeout.
     advance_time(&env, ESCROW_TIMEOUT_SECS + 1);
 
-    // Now refund_funds should succeed even without mocking coordinator auth,
-    // because the escrow is expired. We call with NO auth setup (only mock_all_auths
-    // was set in setup(); after advance_time the contract logic bypasses auth).
-    //
-    // We still have mock_all_auths from setup() active, so to test the "anyone
-    // can trigger" path we verify expiry check in get_escrow first.
-    let record = client
-        .refund_funds(&sym(&env, "taskTimeout"), &sym(&env, "nodeA"))
-        .unwrap();
+    let record = client.refund_funds(&sym(&env, "taskTimeout"), &sym(&env, "nodeA"));
 
     assert_eq!(record.status, EscrowStatus::Refunded);
     assert_eq!(record.submitter, submitter);
@@ -439,22 +394,20 @@ fn test_release_after_timeout_rejected() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskExpired"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskExpired"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_000_i128,
+    );
 
     // Advance past timeout.
     advance_time(&env, ESCROW_TIMEOUT_SECS + 1);
 
     // release_funds must be rejected after timeout.
-    let result = client.release_funds(&sym(&env, "taskExpired"), &sym(&env, "nodeA"));
-    assert_eq!(result.unwrap_err(), Error::EscrowExpired);
+    let result = client.try_release_funds(&sym(&env, "taskExpired"), &sym(&env, "nodeA"));
+    assert_eq!(result, Err(Ok(Error::EscrowExpired)));
 }
 
 #[test]
@@ -463,22 +416,18 @@ fn test_release_before_timeout_succeeds() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskFresh"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskFresh"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_000_i128,
+    );
 
     // Advance just before the timeout — release should still succeed.
     advance_time(&env, ESCROW_TIMEOUT_SECS - 1);
 
-    let record = client
-        .release_funds(&sym(&env, "taskFresh"), &sym(&env, "nodeA"))
-        .unwrap();
+    let record = client.release_funds(&sym(&env, "taskFresh"), &sym(&env, "nodeA"));
     assert_eq!(record.status, EscrowStatus::Released);
 }
 
@@ -490,15 +439,13 @@ fn test_lock_funds_emits_locked_event() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskEvt1"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskEvt1"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
 
     let events = env.events().all();
     assert!(!events.is_empty(), "at least one event should be emitted");
@@ -517,18 +464,14 @@ fn test_release_funds_emits_released_event() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskEvt2"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
-    client
-        .release_funds(&sym(&env, "taskEvt2"), &sym(&env, "nodeA"))
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskEvt2"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
+    client.release_funds(&sym(&env, "taskEvt2"), &sym(&env, "nodeA"));
 
     let events = env.events().all();
     let (_, topics, _) = events.last().unwrap();
@@ -544,18 +487,14 @@ fn test_refund_funds_emits_refunded_event() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskEvt3"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &1_000_i128,
-        )
-        .unwrap();
-    client
-        .refund_funds(&sym(&env, "taskEvt3"), &sym(&env, "nodeA"))
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskEvt3"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &1_000_i128,
+    );
+    client.refund_funds(&sym(&env, "taskEvt3"), &sym(&env, "nodeA"));
 
     let events = env.events().all();
     let (_, topics, _) = events.last().unwrap();
@@ -570,8 +509,8 @@ fn test_refund_funds_emits_refunded_event() {
 #[test]
 fn test_get_escrow_returns_not_found_for_missing_record() {
     let (env, client, _coord) = setup();
-    let result = client.get_escrow(&sym(&env, "missing"), &sym(&env, "nodeA"));
-    assert_eq!(result.unwrap_err(), Error::NotFound);
+    let result = client.try_get_escrow(&sym(&env, "missing"), &sym(&env, "nodeA"));
+    assert_eq!(result, Err(Ok(Error::NotFound)));
 }
 
 #[test]
@@ -580,19 +519,15 @@ fn test_get_escrow_returns_full_record() {
     let submitter = Address::generate(&env);
     let agent = Address::generate(&env);
 
-    client
-        .lock_funds(
-            &sym(&env, "taskGet"),
-            &sym(&env, "nodeB"),
-            &submitter,
-            &agent,
-            &999_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskGet"),
+        &sym(&env, "nodeB"),
+        &submitter,
+        &agent,
+        &999_i128,
+    );
 
-    let record = client
-        .get_escrow(&sym(&env, "taskGet"), &sym(&env, "nodeB"))
-        .unwrap();
+    let record = client.get_escrow(&sym(&env, "taskGet"), &sym(&env, "nodeB"));
     assert_eq!(record.amount, 999_i128);
     assert_eq!(record.status, EscrowStatus::Locked);
     assert_eq!(record.submitter, submitter);
@@ -608,32 +543,24 @@ fn test_multiple_escrows_are_independent() {
     let agent = Address::generate(&env);
 
     // Lock two separate escrows.
-    client
-        .lock_funds(
-            &sym(&env, "taskMulti"),
-            &sym(&env, "nodeA"),
-            &submitter,
-            &agent,
-            &100_i128,
-        )
-        .unwrap();
-    client
-        .lock_funds(
-            &sym(&env, "taskMulti"),
-            &sym(&env, "nodeB"),
-            &submitter,
-            &agent,
-            &200_i128,
-        )
-        .unwrap();
+    client.lock_funds(
+        &sym(&env, "taskMulti"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &100_i128,
+    );
+    client.lock_funds(
+        &sym(&env, "taskMulti"),
+        &sym(&env, "nodeB"),
+        &submitter,
+        &agent,
+        &200_i128,
+    );
 
     // Release one, refund the other.
-    let released = client
-        .release_funds(&sym(&env, "taskMulti"), &sym(&env, "nodeA"))
-        .unwrap();
-    let refunded = client
-        .refund_funds(&sym(&env, "taskMulti"), &sym(&env, "nodeB"))
-        .unwrap();
+    let released = client.release_funds(&sym(&env, "taskMulti"), &sym(&env, "nodeA"));
+    let refunded = client.refund_funds(&sym(&env, "taskMulti"), &sym(&env, "nodeB"));
 
     assert_eq!(released.status, EscrowStatus::Released);
     assert_eq!(refunded.status, EscrowStatus::Refunded);
@@ -654,12 +581,69 @@ fn test_operations_on_uninitialized_contract_fail() {
     let agent = Address::generate(&env);
 
     // lock_funds without initialize should fail (no coordinator set).
-    let result = client.lock_funds(
+    let result = client.try_lock_funds(
         &sym(&env, "taskUninit"),
         &sym(&env, "nodeA"),
         &submitter,
         &agent,
         &100_i128,
     );
-    assert_eq!(result.unwrap_err(), Error::NotInitialized);
+    assert_eq!(result, Err(Ok(Error::NotInitialized)));
+}
+
+// ── Platform Fee Collection Tests (Issue #412) ──────────────────────────────
+
+#[test]
+fn test_platform_fee_collection_and_accounting() {
+    let (env, client, _coord) = setup();
+    let treasury = Address::generate(&env);
+    let submitter = Address::generate(&env);
+    let agent = Address::generate(&env);
+
+    client.set_treasury(&treasury);
+    assert_eq!(client.get_treasury(), Some(treasury.clone()));
+
+    // Set 1% fee (100 bps)
+    client.set_platform_fee_bps(&100);
+    assert_eq!(client.get_platform_fee_bps(), 100);
+
+    // 100 XLM = 1_000_000_000 stroops
+    let amount = 1_000_000_000_i128;
+    client.lock_funds(
+        &sym(&env, "taskFee1"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &amount,
+    );
+
+    let record = client.release_funds(&sym(&env, "taskFee1"), &sym(&env, "nodeA"));
+    assert_eq!(record.status, EscrowStatus::Released);
+
+    // 1% of 100 XLM = 1 XLM (10_000_000 stroops)
+    let expected_fee = 10_000_000_i128;
+    assert_eq!(client.get_total_fees_collected(), expected_fee);
+}
+
+#[test]
+fn test_zero_fee_does_not_block_payment() {
+    let (env, client, _coord) = setup();
+    let submitter = Address::generate(&env);
+    let agent = Address::generate(&env);
+
+    client.set_platform_fee_bps(&0);
+    assert_eq!(client.get_platform_fee_bps(), 0);
+
+    let amount = 500_000_i128;
+    client.lock_funds(
+        &sym(&env, "taskZeroFee"),
+        &sym(&env, "nodeA"),
+        &submitter,
+        &agent,
+        &amount,
+    );
+
+    let record = client.release_funds(&sym(&env, "taskZeroFee"), &sym(&env, "nodeA"));
+    assert_eq!(record.status, EscrowStatus::Released);
+    assert_eq!(client.get_total_fees_collected(), 0);
 }

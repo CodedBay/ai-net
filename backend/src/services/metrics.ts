@@ -17,12 +17,15 @@
  * without touching a database, a socket, or the clock.
  */
 
+import fs from "fs";
 import os from "os";
+import path from "path";
 import { PerformanceObserver } from "perf_hooks";
 
 import { getConfig } from "../config";
 import { createLogger } from "../utils/logger";
 import { getCacheMetrics } from "../cache/metrics";
+import { databasePoolMetrics } from "../db/metrics";
 import type {
   AgentMetrics,
   CpuMetrics,
@@ -547,6 +550,20 @@ export class MetricsService {
 
   private webSocketProbe: (() => WebSocketProbeResult) | null = null;
 
+  private getLastBackupAgeHours(): number {
+    const markerPath = process.env.BACKUP_TIMESTAMP_FILE ?? path.join(
+      process.env.DB_DIR ?? process.cwd(),
+      ".last-backup-timestamp",
+    );
+    try {
+      const timestampSeconds = Number(fs.readFileSync(markerPath, "utf8").trim());
+      if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return -1;
+      return Math.max(0, (this.clock() / 1000 - timestampSeconds) / 3600);
+    } catch {
+      return -1;
+    }
+  }
+
   constructor(options: MetricsCollectorOptions = {}) {
     const config = readMetricsConfig();
     this.cacheTtlMs = options.cacheTtlMs ?? config.cacheTtlMs;
@@ -703,10 +720,13 @@ export class MetricsService {
   private veniceCallsByAgentType = new Map<string, number>();
   /** stellar_transactions_total by type — key: type, value: count. */
   private stellarTransactionsByType = new Map<string, number>();
+  private taskResultCompressionRatioTotal = 0;
+  private taskResultCompressionCount = 0;
   /** active_websocket_connections gauge — live count set externally. */
   private activeWsConnections = 0;
   /** agent_health_status by agent_id — key: agentId, value: 1|0. */
   private agentHealthStatuses = new Map<string, number>();
+  private agentQualityScores = new Map<string, number>();
 
   /** Record completed task duration in seconds. */
   recordTaskCompletion(durationSeconds: number, _status: string = "completed"): void {
@@ -778,6 +798,12 @@ export class MetricsService {
     this.stellarTransactionsByType.set(key, (this.stellarTransactionsByType.get(key) ?? 0) + 1);
   }
 
+  recordTaskResultCompressionRatio(ratio: number): void {
+    if (!Number.isFinite(ratio) || ratio < 0) return;
+    this.taskResultCompressionRatioTotal += ratio;
+    this.taskResultCompressionCount += 1;
+  }
+
   /** Set active WebSocket connections gauge (called by stream layer). */
   setActiveWsConnections(count: number): void {
     this.activeWsConnections = Math.max(0, count);
@@ -795,6 +821,10 @@ export class MetricsService {
    */
   setAgentHealthStatus(agentId: string, healthy: boolean): void {
     this.agentHealthStatuses.set(agentId, healthy ? 1 : 0);
+  }
+
+  setAgentQualityScore(agentId: string, score: number): void {
+    this.agentQualityScores.set(agentId, Math.max(0, Math.min(100, score)));
   }
 
   /** Remove an agent's health entry (e.g. on deregistration). */
@@ -828,19 +858,26 @@ export class MetricsService {
     }
 
     const lines: string[] = [];
+    const poolMetrics = databasePoolMetrics();
 
-    // ── 1. http_requests_total{method,path,status} ───────────────────────────
-    lines.push("# HELP http_requests_total Total number of HTTP requests by method, path and status");
-    lines.push("# TYPE http_requests_total counter");
+    // ── 0. ainet_up gauge ─────────────────────────────────────────────────────
+    lines.push("# HELP ainet_up Whether the ai-net backend is running");
+    lines.push("# TYPE ainet_up gauge");
+    lines.push("ainet_up 1");
+    lines.push("");
+
+    // ── 1. ainet_http_requests_total{method,path,status} ─────────────────────
+    lines.push("# HELP ainet_http_requests_total Total number of HTTP requests by method, path and status");
+    lines.push("# TYPE ainet_http_requests_total counter");
     if (httpCountByLabel.size === 0) {
-      lines.push('http_requests_total{method="GET",path="/",status="200"} 0');
+      lines.push('ainet_http_requests_total{method="GET",path="/",status="200"} 0');
     } else {
       for (const [key, count] of httpCountByLabel.entries()) {
         const parts = key.split("::");
         const method = parts[0] ?? "UNKNOWN";
         const path = parts[1] ?? "/";
         const status = parts[2] ?? "0";
-        lines.push(`http_requests_total{method="${method}",path="${path}",status="${status}"} ${count}`);
+        lines.push(`ainet_http_requests_total{method="${method}",path="${path}",status="${status}"} ${count}`);
       }
     }
 
@@ -851,7 +888,7 @@ export class MetricsService {
     for (const ms of httpDurationsMs) {
       observeHistogram(durHist, ms / 1000); // convert ms to seconds
     }
-    lines.push(renderHistogram("http_request_duration_seconds", "HTTP request latency in seconds", durHist));
+    lines.push(renderHistogram("ainet_http_request_duration_seconds", "HTTP request latency in seconds", durHist));
 
     // ── 3. tasks_submitted_total ──────────────────────────────────────────────
     lines.push("");
@@ -906,6 +943,14 @@ export class MetricsService {
       }
     }
 
+    lines.push("");
+    lines.push("# HELP task_result_compression_ratio Average compressed-to-original result size ratio");
+    lines.push("# TYPE task_result_compression_ratio gauge");
+    const compressionRatio = this.taskResultCompressionCount === 0
+      ? 0
+      : this.taskResultCompressionRatioTotal / this.taskResultCompressionCount;
+    lines.push(`task_result_compression_ratio ${compressionRatio}`);
+
     // ── 8. active_websocket_connections gauge ─────────────────────────────────
     // Prefer the live probe result from the stream layer; fall back to our counter.
     const wsProbeResult = this.webSocketProbe?.();
@@ -914,6 +959,11 @@ export class MetricsService {
     lines.push("# HELP active_websocket_connections Number of active WebSocket connections");
     lines.push("# TYPE active_websocket_connections gauge");
     lines.push(`active_websocket_connections ${wsCount}`);
+
+    lines.push("");
+    lines.push("# HELP last_backup_age_hours Age of the last successful database backup in hours; -1 means no timestamp is available");
+    lines.push("# TYPE last_backup_age_hours gauge");
+    lines.push(`last_backup_age_hours ${this.getLastBackupAgeHours()}`);
 
     // ── 9. agent_health_status{agent_id} gauge ────────────────────────────────
     lines.push("");
@@ -928,6 +978,31 @@ export class MetricsService {
       }
     }
 
+    // ── SQLite connection pool health ───────────────────────────────────────
+    lines.push("");
+    lines.push("# HELP db_pool_active_connections Active SQLite reader connections");
+    lines.push("# TYPE db_pool_active_connections gauge");
+    lines.push("# HELP db_pool_idle_connections Idle SQLite reader connections");
+    lines.push("# TYPE db_pool_idle_connections gauge");
+    lines.push("# HELP db_pool_waiting_queue_size Callers waiting for an SQLite reader");
+    lines.push("# TYPE db_pool_waiting_queue_size gauge");
+    lines.push("# HELP db_pool_acquire_wait_seconds SQLite reader acquisition wait time");
+    lines.push("# TYPE db_pool_acquire_wait_seconds histogram");
+    for (const [database, pool] of Object.entries(poolMetrics)) {
+      const labels = `{database="${database}"}`;
+      lines.push(`db_pool_active_connections${labels} ${pool.activeConnections}`);
+      lines.push(`db_pool_idle_connections${labels} ${pool.idleConnections}`);
+      lines.push(`db_pool_waiting_queue_size${labels} ${pool.pendingAcquires}`);
+      let cumulative = 0;
+      for (const [bound, count] of Object.entries(pool.acquireWaitBuckets)) {
+        cumulative = count;
+        lines.push(`db_pool_acquire_wait_seconds_bucket{database="${database}",le="${bound}"} ${cumulative}`);
+      }
+      lines.push(`db_pool_acquire_wait_seconds_bucket{database="${database}",le="+Inf"} ${pool.acquireWaitCount}`);
+      lines.push(`db_pool_acquire_wait_seconds_sum${labels} ${pool.acquireWaitSumSeconds}`);
+      lines.push(`db_pool_acquire_wait_seconds_count${labels} ${pool.acquireWaitCount}`);
+    }
+
     // ── Legacy metric families (keep for backward compat with existing dashboard) ──
     lines.push("");
     lines.push(formatPrometheusMetrics({
@@ -940,6 +1015,25 @@ export class MetricsService {
       veniceCircuitBreakerState: this.veniceCircuitBreakerState,
     }));
 
+    // ── Process gauges ────────────────────────────────────────────────────────
+    const mem = process.memoryUsage();
+    lines.push("");
+    lines.push("# HELP ainet_process_uptime_seconds Process uptime in seconds");
+    lines.push("# TYPE ainet_process_uptime_seconds gauge");
+    lines.push(`ainet_process_uptime_seconds ${process.uptime()}`);
+    lines.push("# HELP ainet_process_memory_rss_bytes Resident Set Size in bytes");
+    lines.push("# TYPE ainet_process_memory_rss_bytes gauge");
+    lines.push(`ainet_process_memory_rss_bytes ${mem.rss}`);
+    lines.push("# HELP ainet_process_memory_heap_total_bytes Total heap size in bytes");
+    lines.push("# TYPE ainet_process_memory_heap_total_bytes gauge");
+    lines.push(`ainet_process_memory_heap_total_bytes ${mem.heapTotal}`);
+    lines.push("# HELP ainet_process_memory_heap_used_bytes Used heap size in bytes");
+    lines.push("# TYPE ainet_process_memory_heap_used_bytes gauge");
+    lines.push(`ainet_process_memory_heap_used_bytes ${mem.heapUsed}`);
+    lines.push("# HELP ainet_process_memory_external_bytes External memory in bytes");
+    lines.push("# TYPE ainet_process_memory_external_bytes gauge");
+    lines.push(`ainet_process_memory_external_bytes ${mem.external}`);
+
     return lines.join("\n") + "\n";
   }
 
@@ -951,7 +1045,7 @@ export class MetricsService {
       status: "ok",
       uptimeSeconds: Math.max(0, Math.floor((this.clock() - this.startedAtMs) / 1000)),
       lastScrapeTimestamp: this.lastScrapeTimestamp,
-      metricFamiliesCount: 17, // 9 new + 8 legacy families
+      metricFamiliesCount: 18, // 10 new + 8 legacy families
       registeredOnce: this.registeredOnce,
     };
   }
@@ -970,8 +1064,11 @@ export class MetricsService {
     this.tasksFailedByReason.clear();
     this.veniceCallsByAgentType.clear();
     this.stellarTransactionsByType.clear();
+    this.taskResultCompressionRatioTotal = 0;
+    this.taskResultCompressionCount = 0;
     this.activeWsConnections = 0;
     this.agentHealthStatuses.clear();
+    this.agentQualityScores.clear();
     this.resetCache();
   }
 

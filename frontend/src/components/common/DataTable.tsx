@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import styles from './DataTable.module.css';
 
 export type SortDirection = 'asc' | 'desc';
+export type MobileColumnPriority = 'primary' | 'secondary' | 'hidden-mobile';
+export type MobileTableView = 'scroll' | 'cards';
 
 export interface DataTableColumn<T> {
   key: string;
   header: string;
+  priority?: MobileColumnPriority;
   sortable?: boolean;
   render?: (row: T) => React.ReactNode;
   className?: string;
@@ -30,6 +33,7 @@ export interface DataTableProps<T> {
   onSort?: (key: string, direction: SortDirection) => void;
   rowClassName?: (row: T) => string;
   getRowTestId?: (row: T) => string;
+  mobileView?: MobileTableView;
 }
 
 function getCellValue<T>(row: T, key: string): string | number | boolean | null {
@@ -77,6 +81,7 @@ export function DataTable<T>({
   onSort,
   rowClassName,
   getRowTestId,
+  mobileView = 'scroll',
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -84,6 +89,36 @@ export function DataTable<T>({
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [scrollTop, setScrollTop] = useState(0);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
+  const [scrollState, setScrollState] = useState({ overflowing: false, left: false, right: false });
+
+  const updateScrollState = useCallback(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+
+    const nextState = {
+      overflowing: viewport.scrollWidth > viewport.clientWidth,
+      left: viewport.scrollLeft > 0,
+      right: viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - 1,
+    };
+    setScrollState((current) => (
+      current.overflowing === nextState.overflowing && current.left === nextState.left && current.right === nextState.right
+        ? current
+        : nextState
+    ));
+  }, []);
+
+  useEffect(() => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+
+    updateScrollState();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateScrollState);
+    observer.observe(viewport);
+    if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
+    return () => observer.disconnect();
+  }, [columns.length, rows.length, updateScrollState]);
 
   const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDirection), [rows, sortKey, sortDirection]);
 
@@ -161,21 +196,35 @@ export function DataTable<T>({
   }
 
   return (
-    <div className={`${styles.wrapper} ${className ?? ''}`} style={{ maxHeight }}>
+    <div
+      className={`${styles.wrapper} ${className ?? ''}`}
+      style={{ maxHeight }}
+      data-overflowing={scrollState.overflowing || undefined}
+      data-scroll-left={scrollState.left || undefined}
+      data-scroll-right={scrollState.right || undefined}
+    >
       <div
         ref={scrollRef}
         className={styles.viewport}
         style={virtualization ? { maxHeight, overflowY: 'auto' } : undefined}
-        onScroll={virtualization ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
+        onScroll={(event) => {
+          if (virtualization) setScrollTop(event.currentTarget.scrollTop);
+          updateScrollState();
+        }}
       >
-        <table className={styles.table}>
+        <table className={`${styles.table} ${mobileView === 'cards' ? styles.mobileCards : ''}`} data-mobile-view={mobileView}>
           <thead className={stickyHeader ? styles.stickyHeader : ''}>
             <tr>
               {onRowSelect && <th className={styles.selectionCell} aria-label="Row selection" />}
               {columns.map((column) => (
                 <th
                   key={column.key}
-                  className={column.sortable ? styles.sortableHeader : undefined}
+                  className={[
+                    column.sortable ? styles.sortableHeader : '',
+                    column.priority === 'primary' ? styles.primaryColumn : '',
+                    column.priority === 'hidden-mobile' ? styles.hiddenMobileColumn : '',
+                  ].filter(Boolean).join(' ')}
+                  data-priority={column.priority ?? 'secondary'}
                   style={{ width: column.width, minWidth: column.minWidth, resize: 'horizontal' }}
                   aria-sort={
                     column.sortable
@@ -241,7 +290,13 @@ export function DataTable<T>({
                   {columns.map((column) => (
                     <td
                       key={`${String(rowKey)}-${column.key}`}
-                      className={column.className}
+                      className={[
+                        column.className ?? '',
+                        column.priority === 'primary' ? styles.primaryColumn : '',
+                        column.priority === 'hidden-mobile' ? styles.hiddenMobileColumn : '',
+                      ].filter(Boolean).join(' ')}
+                      data-label={column.header}
+                      data-priority={column.priority ?? 'secondary'}
                       title={typeof getCellValue(row, column.key) === 'string' ? String(getCellValue(row, column.key)) : undefined}
                     >
                       {column.render ? column.render(row) : getCellValue(row, column.key) ?? '—'}

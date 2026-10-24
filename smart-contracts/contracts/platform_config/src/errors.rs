@@ -20,4 +20,8 @@ pub enum Error {
     InvalidMultisigConfig = 7,
     /// `threshold` is zero or exceeds the number of admins.
     InvalidThreshold = 8,
+    /// Timelock has not elapsed yet.
+    TimelockNotElapsed = 9,
+    /// No pending fee change exists.
+    NoPendingFeeChange = 10,
 }

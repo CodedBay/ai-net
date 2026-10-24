@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
@@ -32,8 +32,34 @@ const LoadingFallback: React.FC = () => {
   );
 };
 
-const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
+const getAgentDisplayName = (type: Capability, customName?: string): string => {
+  if (customName) return customName;
+  switch (type) {
+    case 'research':
+    case 'report':
+      return 'Research Agent';
+    case 'coding':
+      return 'Coding Agent';
+    case 'design':
+      return 'Design Agent';
+    case 'risk':
+      return 'Risk Matrix Agent';
+    default:
+      return `${type} Agent`;
+  }
+};
+
+const AgentOutputRenderer: React.FC<Props> = ({
+  agentType,
+  result,
+  agentName,
+  executionTimeMs,
+  tokenCount,
+}) => {
   const { t } = useTranslation();
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+  const displayName = getAgentDisplayName(agentType, agentName);
   // All renderers handle null/undefined result with an empty-state placeholder
   if (result === null || result === undefined) {
     return (
