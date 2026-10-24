@@ -19,8 +19,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const stored = localStorage.getItem('theme-mode')
       if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-    } catch (e) {
-      // ignore localStorage errors (e.g. sandboxed iframe or private browsing)
+    } catch {
+      // Use the system preference when localStorage is unavailable.
     }
     return 'system'
   })
@@ -37,19 +37,22 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (effective === 'light') {
       root.classList.add('theme-light')
+      root.classList.remove('theme-dark')
     } else {
       root.classList.remove('theme-light')
+      root.classList.add('theme-dark')
     }
 
     const metaThemeColor = document.querySelector('meta[name="theme-color"]')
     if (metaThemeColor) {
-      metaThemeColor.setAttribute('content', effective === 'light' ? '#FFFFFF' : '#0A0E14')
+      const canvasColor = getComputedStyle(root).getPropertyValue('--surface-canvas').trim()
+      if (canvasColor) metaThemeColor.setAttribute('content', canvasColor)
     }
 
     try {
       localStorage.setItem('theme-mode', mode)
-    } catch (e) {
-      // ignore
+    } catch {
+      // Theme selection still applies for this session if persistence is blocked.
     }
   }, [mode, systemPrefersDark])
 
@@ -77,15 +80,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (typeof mql.addEventListener === 'function') {
       mql.addEventListener('change', handler)
-    } else if (typeof (mql as any).addListener === 'function') {
-      ;(mql as any).addListener(handler)
+    } else {
+      mql.addListener(handler)
     }
 
     return () => {
       if (typeof mql.removeEventListener === 'function') {
         mql.removeEventListener('change', handler)
-      } else if (typeof (mql as any).removeListener === 'function') {
-        ;(mql as any).removeListener(handler)
+      } else {
+        mql.removeListener(handler)
       }
     }
   }, [])

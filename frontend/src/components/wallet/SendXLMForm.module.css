@@ -93,12 +93,12 @@
 }
 
 .sendButton:active:not(:disabled) {
-  background: #4338ca;
+  background: var(--accent);
   transform: scale(0.97);
 }
 
 .sendButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -142,16 +142,16 @@
 }
 
 .dismissButton:hover {
-  background: #15803d;
+  background: var(--status-success);
 }
 
 .dismissButton:active {
-  background: #166534;
+  background: var(--surface-primary);
   transform: scale(0.96);
 }
 
 .dismissButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -235,12 +235,12 @@
 }
 
 .cancelButton:active:not(:disabled) {
-  background: var(--bg-surface-alt, #161b24);
+  background: var(--bg-surface-alt, var(--surface-canvas));
   transform: scale(0.96);
 }
 
 .cancelButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -261,12 +261,12 @@
 }
 
 .confirmButton:active:not(:disabled) {
-  background: #4338ca;
+  background: var(--accent);
   transform: scale(0.97);
 }
 
 .confirmButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 

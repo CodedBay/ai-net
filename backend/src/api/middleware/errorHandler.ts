@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { createLogger } from "../../utils/logger";
 import { AppError } from "../../errors";
+import { PoolTimeoutError } from "../../db/pool";
 
 const log = createLogger();
 const isProduction = process.env.NODE_ENV === "production";
@@ -24,7 +25,7 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  const isDevelopment = getConfig().NODE_ENV === "development";
+  const isDev = process.env.NODE_ENV === "development";
   const traceId: string =
     err instanceof AppError
       ? err.correlationId
@@ -32,6 +33,7 @@ export function errorHandler(
         (res.locals.correlationId as string | undefined) ??
         "unknown";
   const requestId = (res.locals.requestId as string | undefined) ?? "unknown";
+  const correlationId = traceId;
   const log = createLogger({
     ...(res.locals.logContext as Record<string, unknown> | undefined),
     requestId,
@@ -41,11 +43,15 @@ export function errorHandler(
   const statusCode =
     err instanceof AppError
       ? err.statusCode
+      : err instanceof PoolTimeoutError
+        ? 503
       : (err as any)?.statusCode ?? (err as any)?.status ?? 500;
   const errorCode =
     err instanceof AppError
       ? err.code
-      : isDevelopment
+      : err instanceof PoolTimeoutError
+        ? "DB_POOL_EXHAUSTED"
+      : isDev
         ? (err as any)?.code ?? "INTERNAL_SERVER_ERROR"
         : "INTERNAL_SERVER_ERROR";
 
@@ -129,11 +135,11 @@ export function errorHandler(
         : err instanceof Error
           ? err.message || "Internal server error"
           : "An unexpected error occurred",
-      code: "INTERNAL_ERROR",
+      code: errorCode,
       correlationId,
       timestamp: new Date().toISOString(),
       path: req.path,
-      ...(isDevelopment && err instanceof Error
+      ...(isDev && err instanceof Error
         ? { stack: err.stack }
         : {}),
     },

@@ -14,6 +14,18 @@
   animation: pulse 2s infinite ease-in-out;
 }
 
+.payment-success-check {
+  animation: paymentCheck 500ms ease-out both;
+}
+
+.payment-confetti {
+  animation: paymentConfetti 1s ease-out 500ms both;
+}
+
+.payment-failure-shake {
+  animation: paymentShake 420ms ease-in-out;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -57,6 +69,80 @@
   }
 }
 
+@keyframes paymentCheck {
+  from { opacity: 0; transform: scale(0.45) rotate(-18deg); }
+  70% { opacity: 1; transform: scale(1.15) rotate(4deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@keyframes paymentConfetti {
+  0% { opacity: 1; transform: translateY(0) scale(0.5); }
+  100% { opacity: 0; transform: translateY(-2.5rem) scale(1.15); }
+}
+
+@keyframes paymentShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.payment-feedback {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  overflow: hidden;
+  padding: var(--space-4);
+  border: 1px solid var(--status-success-border);
+  border-radius: var(--radius-lg);
+  background: var(--status-success-surface);
+  color: var(--text-primary);
+}
+
+.payment-feedback-failure {
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-surface);
+  color: var(--status-danger-text);
+}
+
+.payment-feedback-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--status-success-text);
+  color: var(--text-inverse);
+}
+
+.payment-feedback-failure .payment-feedback-icon { background: var(--status-danger-text); }
+.payment-feedback-copy { display: grid; gap: var(--space-1); }
+.payment-feedback-copy span { color: var(--text-secondary); }
+.payment-sound-toggle { z-index: 1; margin-left: auto; padding: var(--space-2); border: 0; background: transparent; color: inherit; cursor: pointer; }
+.payment-confetti { position: absolute; inset: 0 3.5rem 0 auto; width: 3rem; pointer-events: none; }
+.payment-confetti i { position: absolute; top: 50%; left: 50%; width: 0.35rem; height: 0.55rem; border-radius: 1px; background: var(--accent); }
+.payment-confetti i:nth-child(2n) { background: var(--status-warning-text); }
+.payment-confetti i:nth-child(3n) { background: var(--status-info-text); }
+.payment-confetti i:nth-child(1) { --x: -1rem; --y: -1rem; }
+.payment-confetti i:nth-child(2) { --x: 0.8rem; --y: -1.1rem; }
+.payment-confetti i:nth-child(3) { --x: -1.2rem; --y: 0.7rem; }
+.payment-confetti i:nth-child(4) { --x: 1.1rem; --y: 0.8rem; }
+.payment-confetti i:nth-child(5) { --x: 0; --y: -1.3rem; }
+.payment-confetti i:nth-child(6) { --x: 1.4rem; --y: -0.3rem; }
+.payment-confetti i:nth-child(7) { --x: -0.5rem; --y: 1.2rem; }
+.payment-confetti i:nth-child(8) { --x: -1.4rem; --y: -0.2rem; }
+.payment-confetti.payment-confetti i { animation: paymentConfettiPiece 1s ease-out 500ms both; }
+
+@keyframes paymentConfettiPiece {
+  to { opacity: 0; transform: translate(var(--x), var(--y)) rotate(180deg); }
+}
+
+@media (max-width: 480px) {
+  .payment-feedback { align-items: flex-start; }
+  .payment-feedback-copy { min-width: 0; overflow-wrap: anywhere; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fade-in,
   .slide-up,
@@ -66,5 +152,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     animation-delay: 0.01ms !important;
+  }
+
+  .payment-success-check,
+  .payment-confetti,
+  .payment-failure-shake {
+    animation: none !important;
   }
 }

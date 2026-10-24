@@ -35,22 +35,26 @@ once pushed.
 ## Changelog Generation
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/)
-for automatic changelog entries. Each release includes a `CHANGELOG.md` update
-with sections:
+and [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Changelog entries
+use these sections:
 
-- **Features** — new functionality (`feat:`)
-- **Bug Fixes** — resolved issues (`fix:`)
-- **Breaking Changes** — backward-incompatible changes (`feat!:` or `BREAKING CHANGE:`)
-- **Other Changes** — docs, chores, refactors, tests
+- **Added** — new functionality (`feat:`)
+- **Changed** — performance, documentation, refactors, and maintenance
+- **Deprecated** — features scheduled for removal
+- **Removed** — removed features and reverted changes
+- **Fixed** — resolved defects (`fix:`)
+- **Security** — security improvements
 
-### Generate changelog since last tag
+### Generate changelog locally
 
 ```bash
-LAST_TAG=$(git describe --tags --abbrev=0)
-git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges
+npm run changelog
 ```
 
-Add the output under the appropriate section in `CHANGELOG.md`.
+This updates `CHANGELOG.md` from conventional commits without creating a version
+commit or tag. Release Please runs on pushes to `main` and opens or updates a
+release PR with the version bump and generated changelog; merging that PR creates
+the release tag.
 
 ---
 
@@ -111,6 +115,35 @@ find . -name "*.wasm" -exec sha256sum {} \; > SHA256SUMS
 sha256sum -c SHA256SUMS
 ```
 
+### SBOM (Software Bill of Materials)
+
+Every GitHub Release includes SBOM artifacts (`sbom-root.json`, `sbom-frontend.json`, `sbom-backend.json`) generated automatically by the `smart-contracts.yml` release workflow using `@cyclonedx/cyclonedx-npm`. These files enumerate all npm dependencies in CycloneDX JSON format and allow downstream users to audit the full dependency tree.
+
+```bash
+# Manually generate the SBOM for the root workspace
+npm ci --ignore-scripts
+npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom.json
+
+# Validate the SBOM with cyclonedx-cli (optional)
+cyclonedx validate --input-file sbom.json --input-format json
+```
+
+### Security Audits
+
+Automated security audits run on every PR via CI:
+
+```bash
+# npm audit — fails on high/critical CVEs
+npm audit --audit-level=high          # root
+cd frontend && npm audit --audit-level=high
+cd backend && npm audit --audit-level=high
+
+# Cargo audit — fails on high/critical CVEs in Rust dependencies
+cd smart-contracts && cargo audit
+```
+
+Dependabot is configured to automatically raise PRs for outdated or vulnerable dependencies on a weekly schedule (see `.github/dependabot.yml`). Security alert PRs should be treated with the same rigor as production code — review, test, and merge promptly.
+
 ### Wasm Artifact Verification
 
 After downloading a release artifact:
@@ -163,3 +196,11 @@ When upgrading deployed contracts:
 
 All tracks share the same SemVer and tagging convention. A single git tag
 covers all tracks for a given version.
+
+---
+
+## Smart Contract Releases
+
+Smart contract releases on Soroban have unique requirements beyond the standard release checklist: WASM compilation, contract ID management, testnet/mainnet separation, governance approval for breaking upgrades, and emergency hotfix procedures.
+
+For the complete smart contract release workflow, upgrade safety checklist, governance approval process, and emergency hotfix procedure, see **[SMART_CONTRACT_RELEASE.md](./SMART_CONTRACT_RELEASE.md)**.

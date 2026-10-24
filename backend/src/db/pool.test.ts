@@ -78,6 +78,8 @@ describe("SqlitePool", () => {
 
       expect(pool.metrics().activeConnections).toBe(0);
       expect(pool.metrics().idleConnections).toBeGreaterThanOrEqual(1);
+      expect(pool.metrics().acquireWaitCount).toBe(1);
+      expect(pool.metrics().acquireWaitBuckets["0.001"]).toBe(1);
     });
 
     it("releases the connection even when the callback throws", async () => {

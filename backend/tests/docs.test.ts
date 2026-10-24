@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import request from "supertest";
 import YAML from "yaml";
 import { createApp } from "../src/api/app";
@@ -7,6 +9,47 @@ import {
   getOpenapiJson,
   getOpenapiYaml,
 } from "../src/api/docs";
+
+const ROUTE_MODULE_MOUNTS: Array<{ module: string; prefix: string }> = [
+  { module: "admin.ts", prefix: "/api/admin" },
+  { module: "admin.ts", prefix: "/api/admin/queue" },
+  { module: "agents.ts", prefix: "/api/agents" },
+  { module: "auth.ts", prefix: "/api/auth" },
+  { module: "events.ts", prefix: "/api/events" },
+  { module: "health.ts", prefix: "/health" },
+  { module: "metrics.ts", prefix: "/metrics" },
+  { module: "payments.ts", prefix: "/api/payments" },
+  { module: "stats.ts", prefix: "/api/stats" },
+  { module: "reconciliation.ts", prefix: "/api/reconciliation" },
+  { module: "ratelimit.ts", prefix: "/api/ratelimit" },
+  { module: "versions.ts", prefix: "/api/versions" },
+  { module: "admin.ts", prefix: "/api/admin" },
+  { module: "admin.ts", prefix: "/api/admin/queue" },
+  { module: "versions.ts", prefix: "/api/versions" },
+  { module: "v1/tasks.ts", prefix: "/api/tasks" },
+  { module: "v2/tasks.ts", prefix: "/api/tasks" },
+];
+
+function collectImplementedOperations(): Set<string> {
+  const operations = new Set<string>(["GET /tasks/{id}/stream"]);
+  const routePattern = /\b(?:router|tasksRouter)\.(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']/g;
+
+  for (const { module, prefix } of ROUTE_MODULE_MOUNTS) {
+    const sourcePath = path.join(__dirname, "../src/api/routes", module);
+    const source = fs.readFileSync(sourcePath, "utf8");
+    for (const match of source.matchAll(routePattern)) {
+      const routePath = match[2] === "/" ? "" : `/${match[2].replace(/^\//, "")}`;
+      const fullPath = `${prefix}${routePath}`
+        .replace(/\/{2,}/g, "/")
+        .replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+      operations.add(`${match[1].toUpperCase()} ${fullPath}`);
+    }
+  }
+
+  return operations;
+}
+
+const IMPLEMENTED_OPERATIONS = collectImplementedOperations();
 
 describe("API Documentation & Swagger UI", () => {
   let app: ReturnType<typeof createApp>;
@@ -34,6 +77,31 @@ describe("API Documentation & Swagger UI", () => {
       expect(openapiSpec.info.description).toContain("Rate Limiting");
       expect(openapiSpec.info.description).toContain("Live Task Stream (WebSocket)");
       expect(openapiSpec.info.description).toContain("Pagination & Filtering");
+    });
+
+    it("should define at least one described response for every documented endpoint", () => {
+      for (const [routePath, pathItem] of Object.entries(openapiSpec.paths ?? {})) {
+        for (const [method, operation] of Object.entries(pathItem as Record<string, any>)) {
+          if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+          expect(Object.keys(operation.responses ?? {}).length).toBeGreaterThan(0);
+          for (const [status, response] of Object.entries(operation.responses ?? {})) {
+            expect(status).toMatch(/^(default|[1-5][0-9X]{2})$/);
+            expect((response as { description?: string }).description).toEqual(expect.any(String));
+          }
+        }
+      }
+    });
+
+    it("should map every documented method and path to an Express route", () => {
+      const missing: string[] = [];
+      for (const [routePath, pathItem] of Object.entries(openapiSpec.paths ?? {})) {
+        for (const method of ["get", "post", "put", "patch", "delete"]) {
+          if ((pathItem as Record<string, unknown>)[method] && !IMPLEMENTED_OPERATIONS.has(`${method.toUpperCase()} ${routePath}`)) {
+            missing.push(`${method.toUpperCase()} ${routePath}`);
+          }
+        }
+      }
+      expect(missing).toEqual([]);
     });
 
     it("should declare WalletAuth, AgentSignatureAuth, and AgentChallengeAuth security schemes", () => {

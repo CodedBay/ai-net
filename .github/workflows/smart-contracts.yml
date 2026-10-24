@@ -33,7 +33,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -61,7 +61,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: contract-wasm-${{ github.sha }}
           path: |
@@ -80,3 +80,63 @@ jobs:
             --repo "${{ github.repository }}" \
             *.wasm SHA256SUMS.txt \
             --clobber
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Generate root SBOM
+        run: |
+          npm ci --ignore-scripts
+          npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom-root.json
+        continue-on-error: true
+
+      - name: Generate frontend SBOM
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts
+          npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file ../sbom-frontend.json
+        continue-on-error: true
+
+      - name: Generate backend SBOM
+        working-directory: backend
+        run: |
+          npm ci --ignore-scripts
+          npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file ../sbom-backend.json
+        continue-on-error: true
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom-root.json
+            sbom-frontend.json
+            sbom-backend.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Attach SBOM to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in sbom-root.json sbom-frontend.json sbom-backend.json; do
+            if [ -f "$f" ]; then
+              gh release upload "${{ github.event.release.tag_name }}" \
+                --repo "${{ github.repository }}" \
+                "$f" --clobber
+            fi
+          done

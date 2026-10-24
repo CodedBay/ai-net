@@ -304,3 +304,24 @@ pub struct CallerActivity {
     /// Timestamp of this caller's most recent audited operation.
     pub last_seen: u64,
 }
+
+// ─── On-chain Reputation (issue #191) ────────────────────────────────────────
+
+/// On-chain reputation record for an agent.
+///
+/// Stored in Persistent storage keyed by `DataKey::Reputation(agent_id)`.
+/// The `score` field is always recomputed on every update so it stays
+/// consistent with the raw counters.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationScore {
+    /// Number of tasks this agent completed successfully.
+    pub tasks_completed: u32,
+    /// Number of tasks this agent failed.
+    pub tasks_failed: u32,
+    /// Total XLM paid out to this agent across all completed tasks (in stroops).
+    pub total_payout_xlm: i128,
+    /// Computed score in the range [0, 100].
+    /// Formula: `(tasks_completed * 100) / max(tasks_completed + tasks_failed, 1)`
+    pub score: u32,
+}

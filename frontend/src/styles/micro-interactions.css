@@ -50,6 +50,40 @@
   transition-duration: 500ms;
 }
 
+.agent-card-interactive {
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+.agent-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.agent-card-interactive:focus-visible {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 3px;
+}
+
+.agent-card-selection-badge {
+  position: absolute;
+  z-index: 2;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--status-success-text-strong);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-card-selected {
+  border-color: var(--status-success-text-strong) !important;
+  box-shadow: 0 0 0 1px var(--status-success-text-strong);
+}
+
 /* ─── Shared press state (issue #380) ─────────────────────────────────────
    Tactile "pressed" feedback for buttons, chips, toggles and nav items.
    Apply by adding the .pressable class alongside existing styles. */
@@ -108,6 +142,14 @@
   .pressable,
   .pressable-elevated {
     transition-duration: 0.01ms !important;
+  }
+
+  .agent-card-interactive {
+    transition: none !important;
+  }
+
+  .agent-card-interactive:hover {
+    transform: none;
   }
 
   .pressable:active:not(:disabled),

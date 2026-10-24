@@ -8,6 +8,9 @@
   overflow: hidden;
   border: 1px solid #1e293b;
   background: #0a0e14;
+  /* Tablet: ensure the DAG canvas doesn't overflow the page width */
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 @media (min-width: 768px) {
@@ -22,14 +25,21 @@
   }
 }
 
+/* Tablet: scale down min-height slightly to give room for other content */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .container {
+    min-height: 280px;
+  }
+}
+
 /* ─── Empty state ─────────────────────────────────────────────────────────── */
 
 .empty {
   padding: 32px 24px;
   border-radius: 12px;
-  border: 1px dashed #334155;
-  color: #64748b;
-  background: #0f172a;
+  border: 1px dashed var(--border-muted);
+  color: var(--text-secondary);
+  background: var(--surface-canvas);
   min-height: 180px;
   display: flex;
   align-items: center;
@@ -49,26 +59,25 @@
   padding: 10px 14px 8px;
   min-width: 130px;
   border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.08);
-  background: rgba(30, 41, 59, 0.85);
-  color: #e2e8f0;
+  border: 2px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
+  background: color-mix(in srgb, var(--surface-black) 85%, transparent);
+  color: var(--text-muted);
   font-family: inherit;
   cursor: pointer;
-  transition:
-    border-color 0.2s ease,
+  transition: border-color 0.2s ease,
     box-shadow 0.2s ease,
     transform 0.15s ease;
 }
 
 .node:hover {
-  border-color: var(--node-accent, #8b5cf6);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent, #8b5cf6) 45%, transparent);
+  border-color: var(--node-accent, var(--accent-border));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent);
   transform: translateY(-1px);
 }
 
 .nodeSelected {
-  border-color: var(--node-accent, #8b5cf6) !important;
-  box-shadow: 0 0 18px color-mix(in srgb, var(--node-accent, #8b5cf6) 60%, transparent) !important;
+  border-color: var(--node-accent, var(--accent-border)) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--node-accent, var(--accent)) 60%, transparent) !important;
 }
 
 /* Capability badge (two-letter monogram) */
@@ -82,7 +91,7 @@
   font-size: 0.6rem;
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: #fff;
+  color: var(--text-inverse);
   flex-shrink: 0;
 }
 
@@ -104,22 +113,22 @@
   letter-spacing: 0.08em;
   padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.3);
+  background: color-mix(in srgb, var(--surface-black) 30%, transparent);
 }
 
 /* ─── Status colour overrides ─────────────────────────────────────────────── */
 
-.status_pending  { color: #94a3b8; }
-.status_running  { color: #818cf8; }
-.status_completed { color: #34d399; }
-.status_failed   { color: #f87171; }
+.status_pending  { color: var(--text-muted); }
+.status_running  { color: var(--accent-text); }
+.status_completed { color: var(--status-success-text); }
+.status_failed   { color: var(--status-danger-text); }
 
 /* ─── ReactFlow handle dots ───────────────────────────────────────────────── */
 
 .handle {
   width: 6px !important;
   height: 6px !important;
-  background: #475569 !important;
+  background: var(--surface-primary) !important;
   border: none !important;
 }
 
@@ -135,9 +144,9 @@
 
   min-width: 160px;
   border-radius: 10px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-muted);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--surface-black) 50%, transparent);
   padding: 0;
   overflow: hidden;
 
@@ -171,7 +180,7 @@
 .tooltipTitle {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -195,20 +204,20 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .tooltipRow dd {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-muted);
   text-align: right;
 }
 
 .tooltipMono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.6rem !important;
-  color: #94a3b8 !important;
+  color: var(--text-muted) !important;
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,8 +228,8 @@
 
 .minimap {
   border-radius: 8px !important;
-  border: 1px solid #1e293b !important;
-  background: #0a0e14 !important;
+  border: 1px solid var(--border-muted) !important;
+  background: var(--surface-canvas) !important;
   overflow: hidden;
 }
 
@@ -238,21 +247,21 @@
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  background: rgba(30, 41, 59, 0.9);
-  border: 1px solid #334155;
-  color: #94a3b8;
+  background: color-mix(in srgb, var(--surface-black) 90%, transparent);
+  border: 1px solid var(--border-muted);
+  color: var(--text-muted);
   font-size: 1rem;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .fitViewBtn:hover {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: var(--surface-canvas);
+  color: var(--text-muted);
 }
 
 .fitViewBtn:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--accent-border);
   outline-offset: 2px;
 }
 
@@ -264,7 +273,7 @@
   left: 50%;
   transform: translateX(-50%);
   font-size: 0.6rem;
-  color: #475569;
+  color: var(--text-secondary);
   white-space: nowrap;
   pointer-events: none;
   z-index: 2;

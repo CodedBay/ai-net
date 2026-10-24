@@ -141,6 +141,10 @@ describe('useTaskWebSocket', () => {
     expect(result.current.status).toBe('error');
   });
 
+  // FLAKY: timing-sensitive — reconnection uses a real setTimeout(fn, 1000)
+  // that can race against test teardown when the test runner is under load.
+  // Uses fake timers but spy on global.setTimeout which can be unreliable in
+  // some vitest versions. Tracked in #95.
   it('should handle WebSocket disconnect and trigger reconnection', () => {
     const onDisconnect = vi.fn();
     const mockOptions: UseTaskWebSocketOptions = {

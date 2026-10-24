@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
-import { CircuitBreaker } from './circuitBreaker.js';
+import { VeniceCircuitBreaker } from '../veniceCircuitBreaker.js';
 import { CircuitOpenError, TokenBudgetExceededError } from './errors.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
 import { getConfig } from '../../config/index.js';
+import { tracingService } from '../tracing.js';
+import { currentTraceId } from '../traceContext.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -45,14 +47,14 @@ const MODEL_MAP: Record<AgentType, string> = {
 
 const DEFAULT_MAX_TOKENS = 2048;
 const HARD_TOKEN_CAP = 8192;
-const RETRY_DELAYS_MS = [200, 400, 800, 1600];
+const RETRY_DELAYS_MS = [1000, 2000, 4000];
 const RETRYABLE_STATUS_CODES = new Set([429, 503, 500, 502, 504]);
 const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 422]);
 const DEFAULT_CHAT_MODEL = 'llama-3.3-70b';
 
 export class VeniceClient implements VeniceClientLike {
   private readonly providers: VeniceProviderConfig[];
-  private readonly breaker: CircuitBreaker;
+  private readonly breaker: VeniceCircuitBreaker;
   private readonly cache: VeniceResponseCache;
   private readonly deduplicator: RequestDeduplicator;
   private readonly modelVersion: string;
@@ -69,7 +71,7 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   constructor(config: VeniceClientConfig) {
-    this.breaker = config.circuitBreaker ?? new CircuitBreaker();
+    this.breaker = config.circuitBreaker ?? new VeniceCircuitBreaker();
 
     const env = this.resolveConfig() as any;
     this.modelVersion = config.modelVersion ?? env.VENICE_MODEL_VERSION ?? CONFIG_FALLBACK.VENICE_MODEL_VERSION;
@@ -198,24 +200,49 @@ export class VeniceClient implements VeniceClientLike {
     options?: CompleteOptions
   ): Promise<string> {
     const model = this.getModelFor(agentType);
-    return this.createCompletion({
+    return this.withTraceSpan(agentType, model, prompt, () => this.createCompletion({
       messages: [{ role: 'user', content: prompt }],
       model,
       options,
       promptForLogging: prompt,
       agentType,
-    });
+    }));
   }
 
   async chat(messages: VeniceMessage[], options: VeniceChatOptions = {}): Promise<string> {
     const promptForLogging = messages.map(message => message.content).join('\n\n');
-    return this.createCompletion({
+    return this.withTraceSpan('chat', options.model ?? DEFAULT_CHAT_MODEL, promptForLogging, () => this.createCompletion({
       messages,
       model: options.model ?? DEFAULT_CHAT_MODEL,
       options,
       promptForLogging,
       agentType: 'chat',
-    });
+    }));
+  }
+
+  private async withTraceSpan(
+    agentType: string,
+    model: string,
+    prompt: string,
+    work: () => Promise<string>,
+  ): Promise<string> {
+    const traceId = currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'venice', 'completion', {
+          agentType,
+          model,
+          promptTokenCount: Math.ceil(prompt.length / 4),
+        })
+      : null;
+
+    try {
+      const result = await work();
+      if (span) tracingService.endSpan(span.spanId, 'completed', { outputSizeBytes: Buffer.byteLength(result, 'utf8') });
+      return result;
+    } catch (error) {
+      if (span) tracingService.endSpan(span.spanId, 'failed', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
   }
 
   private async createCompletion({
@@ -236,19 +263,7 @@ export class VeniceClient implements VeniceClientLike {
       throw new TokenBudgetExceededError(maxTokens, HARD_TOKEN_CAP);
     }
 
-    // Circuit breaker check — but allow stale cache fallback even when open
-    try {
-      this.breaker.assertClosed();
-    } catch (e) {
-      if (this.enableCacheFallback && !options?.force) {
-        const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
-        if (stale !== null) {
-          log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
-          return stale;
-        }
-      }
-      throw e;
-    }
+    this.breaker.assertClosed();
 
     const force = options?.force === true;
     const cacheKey = buildCacheKey(promptForLogging, agentType, this.modelVersion);
@@ -327,6 +342,7 @@ export class VeniceClient implements VeniceClientLike {
           body,
           provider,
           () => { retries++; },
+          options?.signal,
         );
         const data: unknown = await response.json();
         const content = (data as any)?.choices?.[0]?.message?.content;
@@ -341,6 +357,7 @@ export class VeniceClient implements VeniceClientLike {
         if (err instanceof CircuitOpenError || err instanceof TokenBudgetExceededError) {
           throw err;
         }
+        if (options?.signal?.aborted) throw options.signal.reason ?? err;
         lastError = err instanceof Error ? err : new Error(String(err));
         // Non-retryable 400/422 on last provider should not failover further — but we still try next if available
         const isNonRetryable = lastError.message.includes('non-retryable');
@@ -352,7 +369,7 @@ export class VeniceClient implements VeniceClientLike {
             'venice provider failed — failing over to next provider',
           );
           // small backoff before failover to next provider
-          await this.sleep(100);
+          await this.sleep(100, options?.signal);
           continue;
         }
         // Last provider failed — record failure for circuit breaker
@@ -400,7 +417,7 @@ export class VeniceClient implements VeniceClientLike {
     for (let pIndex = 0; pIndex < this.providers.length; pIndex++) {
       const provider = this.providers[pIndex]!;
       try {
-        const response = await this.fetchWithRetryForProvider(body, provider, () => { retries++; });
+        const response = await this.fetchWithRetryForProvider(body, provider, () => { retries++; }, options?.signal);
 
         if (!response.body) {
           throw new Error('Venice stream response has no body');
@@ -441,10 +458,11 @@ export class VeniceClient implements VeniceClientLike {
         if (err instanceof CircuitOpenError || err instanceof TokenBudgetExceededError) {
           throw err;
         }
+        if (options?.signal?.aborted) throw options.signal.reason ?? err;
         lastError = err instanceof Error ? err : new Error(String(err));
         if (pIndex < this.providers.length - 1) {
           log.warn({ agentType, model, failedProvider: provider.name, error: lastError.message }, 'venice stream provider failed — failover');
-          await this.sleep(100);
+          await this.sleep(100, options?.signal);
           continue;
         }
         this.breaker.recordFailure();
@@ -464,7 +482,8 @@ export class VeniceClient implements VeniceClientLike {
   private async fetchWithRetryForProvider(
     body: string,
     provider: VeniceProviderConfig,
-    onRetry: () => void
+    onRetry: () => void,
+    signal?: AbortSignal,
   ): Promise<Response> {
     let lastError: Error | undefined;
     const maxAttempts = Math.min(this.maxRetries, RETRY_DELAYS_MS.length) + 1;
@@ -484,7 +503,7 @@ export class VeniceClient implements VeniceClientLike {
             'Authorization': `Bearer ${provider.apiKey}`,
           },
           body,
-          signal: controller.signal,
+          signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
         });
 
         if (timeoutId) clearTimeout(timeoutId);
@@ -505,7 +524,7 @@ export class VeniceClient implements VeniceClientLike {
 
         if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < maxAttempts - 1) {
           onRetry();
-          await this.sleep(this.backoffDelay(attempt));
+          await this.sleep(this.backoffDelay(attempt), signal);
           continue;
         }
 
@@ -514,10 +533,11 @@ export class VeniceClient implements VeniceClientLike {
         if (timeoutId) clearTimeout(timeoutId);
         // AbortError from timeout
         if (err instanceof Error && err.name === 'AbortError') {
+          if (signal?.aborted) throw signal.reason ?? err;
           lastError = new Error(`Venice request timed out after ${this.timeoutMs}ms`);
           if (attempt < maxAttempts - 1) {
             onRetry();
-            await this.sleep(this.backoffDelay(attempt));
+            await this.sleep(this.backoffDelay(attempt), signal);
             continue;
           }
           throw lastError;
@@ -529,7 +549,7 @@ export class VeniceClient implements VeniceClientLike {
         lastError = err instanceof Error ? err : new Error(String(err));
         if (attempt < maxAttempts - 1) {
           onRetry();
-          await this.sleep(this.backoffDelay(attempt));
+          await this.sleep(this.backoffDelay(attempt), signal);
           continue;
         }
       }
@@ -555,8 +575,22 @@ export class VeniceClient implements VeniceClientLike {
     return this.fetchWithRetryForProvider(body, primary, onRetry);
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason ?? new Error('Venice request was cancelled'));
+        return;
+      }
+      const timeout = setTimeout(() => {
+        signal?.removeEventListener('abort', cancel);
+        resolve();
+      }, ms);
+      const cancel = () => {
+        clearTimeout(timeout);
+        reject(signal?.reason ?? new Error('Venice request was cancelled'));
+      };
+      signal?.addEventListener('abort', cancel, { once: true });
+    });
   }
 
   private logRequest(

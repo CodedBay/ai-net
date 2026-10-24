@@ -30,6 +30,17 @@ export interface ValidationErrorBody {
   fieldErrors: FieldError[];
 }
 
+function sanitizeBody(value: unknown): unknown {
+  if (typeof value === "string") return value.replace(/<\/?[^>]+>/g, "");
+  if (Array.isArray(value)) return value.map(sanitizeBody);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeBody(item)]),
+    );
+  }
+  return value;
+}
+
 /**
  * Reusable Zod validation middleware.
  *
@@ -84,7 +95,7 @@ export function validate(schemaOrTargets: ZodSchema | ValidateTargets): Validate
       }
     };
 
-    check("body", targets.body, req.body, (parsed) => {
+    check("body", targets.body, sanitizeBody(req.body ?? {}), (parsed) => {
       req.body = parsed;
     });
     check("query", targets.query, req.query, (parsed) => {

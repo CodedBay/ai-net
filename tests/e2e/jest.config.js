@@ -28,6 +28,7 @@ module.exports = {
       },
     }],
   },
+  setupFiles: ['<rootDir>/../tests/e2e/env.ts'],
   setupFilesAfterEnv: ['<rootDir>/../tests/e2e/setup.ts'],
   globalTeardown: '<rootDir>/../tests/e2e/teardown.ts',
   testTimeout: 30000

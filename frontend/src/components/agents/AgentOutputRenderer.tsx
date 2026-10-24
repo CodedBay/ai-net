@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
@@ -32,8 +32,34 @@ const LoadingFallback: React.FC = () => {
   );
 };
 
-const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
+const getAgentDisplayName = (type: Capability, customName?: string): string => {
+  if (customName) return customName;
+  switch (type) {
+    case 'research':
+    case 'report':
+      return 'Research Agent';
+    case 'coding':
+      return 'Coding Agent';
+    case 'design':
+      return 'Design Agent';
+    case 'risk':
+      return 'Risk Matrix Agent';
+    default:
+      return `${type} Agent`;
+  }
+};
+
+const AgentOutputRenderer: React.FC<Props> = ({
+  agentType,
+  result,
+  agentName,
+  executionTimeMs,
+  tokenCount,
+}) => {
   const { t } = useTranslation();
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+  const displayName = getAgentDisplayName(agentType, agentName);
   // All renderers handle null/undefined result with an empty-state placeholder
   if (result === null || result === undefined) {
     return (
@@ -107,8 +133,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
     flexWrap: 'wrap',
     gap: '12px',
     padding: '12px 16px',
-    backgroundColor: 'rgba(17, 21, 29, 0.7)',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    backgroundColor: 'var(--surface-panel-translucent)',
+    border: '1px solid var(--border-muted)',
     borderRadius: '10px',
     marginBottom: '16px',
     backdropFilter: 'blur(8px)',
@@ -118,7 +144,7 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
     position: 'fixed',
     inset: 0,
     zIndex: 9990,
-    background: 'rgba(10, 14, 20, 0.94)',
+    background: 'var(--surface-overlay)',
     backdropFilter: 'blur(16px)',
     WebkitBackdropFilter: 'blur(16px)',
     display: 'flex',
@@ -131,8 +157,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
     <div className="agent-output-header" data-testid="agent-output-header" style={headerContainerStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Sparkles size={16} color="var(--accent-cyan, #38bdf8)" />
-          <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f5f7fa' }} data-testid="agent-name">
+          <Sparkles size={16} color="var(--accent-cyan)" />
+          <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }} data-testid="agent-name">
             {displayName}
           </span>
         </div>
@@ -145,8 +171,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               alignItems: 'center',
               gap: '4px',
               fontSize: '0.75rem',
-              color: 'var(--text-secondary, #8a93a3)',
-              background: 'rgba(255, 255, 255, 0.05)',
+              color: 'var(--text-secondary)',
+              background: 'var(--surface-hover)',
               padding: '3px 8px',
               borderRadius: '6px',
               fontFamily: 'monospace',
@@ -165,9 +191,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               alignItems: 'center',
               gap: '4px',
               fontSize: '0.75rem',
-              color: 'var(--accent-purple, #8b5cf6)',
-              background: 'rgba(139, 92, 246, 0.12)',
-              border: '1px solid rgba(139, 92, 246, 0.25)',
+              color: 'var(--accent-text-strong)',
+              background: 'var(--accent-surface-muted)',
+              border: '1px solid var(--accent-border)',
               padding: '3px 8px',
               borderRadius: '6px',
               fontFamily: 'monospace',
@@ -184,7 +210,7 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <Search
             size={14}
-            color="#8a93a3"
+            color="var(--text-secondary)"
             style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }}
           />
           <input
@@ -197,9 +223,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               padding: '5px 10px 5px 30px',
               fontSize: '0.8rem',
               borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              background: 'rgba(0, 0, 0, 0.3)',
-              color: '#fff',
+              border: '1px solid var(--border-muted)',
+              background: 'var(--surface-canvas)',
+              color: 'var(--text-primary)',
               outline: 'none',
               width: '160px',
             }}
@@ -214,9 +240,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '4px',
-            background: isFullScreen ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-            border: isFullScreen ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.12)',
-            color: '#fff',
+            background: isFullScreen ? 'var(--info-surface)' : 'var(--surface-hover)',
+            border: isFullScreen ? '1px solid var(--info-border)' : '1px solid var(--border-muted)',
+            color: 'var(--text-primary)',
             padding: '5px 10px',
             borderRadius: '6px',
             cursor: 'pointer',
@@ -247,9 +273,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
             onClick={() => setIsFullScreen(false)}
             data-testid="fullscreen-close-btn"
             style={{
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#f87171',
+              background: 'var(--status-danger-surface)',
+              border: '1px solid var(--status-danger-border)',
+              color: 'var(--status-danger-text)',
               borderRadius: '6px',
               padding: '6px 12px',
               cursor: 'pointer',
@@ -268,8 +294,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
             flex: 1,
             overflowY: 'auto',
             padding: '24px',
-            background: 'rgba(17, 21, 29, 0.8)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'var(--surface-panel-strong)',
+            border: '1px solid var(--border-muted)',
             borderRadius: '12px',
           }}
         >

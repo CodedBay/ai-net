@@ -1,4 +1,5 @@
-export type AgentPreference = 'research' | 'risk' | 'coding' | 'design' | 'report';
+export type AgentPreference =
+  "research" | "risk" | "coding" | "design" | "report";
 
 export interface TaskSubmissionPayload {
   prompt: string;
@@ -6,7 +7,7 @@ export interface TaskSubmissionPayload {
   agentPreferences: AgentPreference[];
 }
 
-export type NodeStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type NodeStatus = "pending" | "running" | "completed" | "failed";
 
 export interface DAGNode {
   nodeId: string;
@@ -16,6 +17,9 @@ export interface DAGNode {
   status: NodeStatus;
   result?: unknown;
   error?: string;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
 }
 
 export interface TaskResponse {
@@ -23,7 +27,7 @@ export interface TaskResponse {
   id?: string;
   prompt: string;
   walletPublicKey: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: "queued" | "running" | "completed" | "failed";
   dag: DAGNode[];
   createdAt: string;
   updatedAt: string;
@@ -48,13 +52,27 @@ export interface TaskSubmitResponse {
   status: string;
 }
 
+export interface TaskEstimateBreakdownItem {
+  agent: AgentPreference;
+  costXLM: number;
+}
+
+export interface TaskEstimate {
+  currency: 'XLM';
+  breakdown: TaskEstimateBreakdownItem[];
+  subtotalXLM: number;
+  platformFeeXLM: number;
+  platformFeeRate: number;
+  estimatedCostXLM: number;
+}
+
 export interface AgentRecord {
   id: string;
   name: string;
   capabilities: string[];
   price: number;
   reputation: number;
-  status: 'active' | 'inactive' | string;
+  status: "active" | "inactive" | string;
   endpoint?: string;
   registrationTxHash?: string;
 }
@@ -78,7 +96,7 @@ export interface NetworkStats {
 
 export interface PaymentEvent {
   amount: string;
-  direction: 'in' | 'out';
+  direction: "in" | "out";
   counterparty: string;
   memo?: string;
   timestamp: string;
@@ -86,13 +104,13 @@ export interface PaymentEvent {
 }
 
 export type DAGEventType =
-  | 'node_started'
-  | 'node_completed'
-  | 'node_failed'
-  | 'payment_locked'
-  | 'payment_released'
-  | 'task_completed'
-  | 'task_failed';
+  | "node_started"
+  | "node_completed"
+  | "node_failed"
+  | "payment_locked"
+  | "payment_released"
+  | "task_completed"
+  | "task_failed";
 
 // Covers all known shapes of DAG event payloads
 // Each event type may carry different fields, so we allow additional properties
@@ -136,4 +154,3 @@ export interface CursorPageEnvelope<T> {
     next?: string;
   };
 }
-

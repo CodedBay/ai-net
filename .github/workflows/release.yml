@@ -1,0 +1,251 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run mode — determine version and notes without publishing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write    # create tags, releases, push CHANGELOG
+  packages: write    # push Docker images to GHCR
+  pull-requests: write  # comment on release PR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # never cancel an in-flight release
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      released:         ${{ steps.release.outputs.released }}
+      version:          ${{ steps.release.outputs.version }}
+      git_tag:          ${{ steps.release.outputs.tag }}
+      release_notes:    ${{ steps.release.outputs.notes }}
+
+    steps:
+      - name: Checkout (full history for semantic-release)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Run semantic-release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            npx semantic-release --dry-run 2>&1 | tee /tmp/sr-output.txt
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            npx semantic-release 2>&1 | tee /tmp/sr-output.txt
+            # Parse outputs from semantic-release stdout
+            VERSION=$(grep -oP 'The next release version is \K[0-9]+\.[0-9]+\.[0-9]+' /tmp/sr-output.txt | tail -1 || echo "")
+            if [[ -n "$VERSION" ]]; then
+              echo "released=true"  >> "$GITHUB_OUTPUT"
+              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+              echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
+            else
+              echo "released=false"  >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  docker:
+    name: build-and-push-docker
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.git_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}/backend
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.release.outputs.version }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=ai-net backend
+            org.opencontainers.image.description=ai-net backend API service
+            org.opencontainers.image.version=${{ needs.release.outputs.version }}
+
+      - name: Build and push backend image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.release.outputs.version }}
+
+      - name: Extract frontend Docker metadata
+        id: meta-frontend
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}/frontend
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.release.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate SHA256 checksums
+        id: checksums
+        run: |
+          VERSION=${{ needs.release.outputs.version }}
+          BACKEND_DIGEST=${{ steps.build.outputs.digest }}
+
+          # Create a checksums file with image digests
+          cat > checksums-v${VERSION}.txt << EOF
+          # ai-net v${VERSION} Docker Image Digests
+          # Verify with: docker pull <image>@<digest>
+          ghcr.io/${{ github.repository }}/backend@${BACKEND_DIGEST}
+          EOF
+
+          sha256sum checksums-v${VERSION}.txt > checksums-v${VERSION}.txt.sha256
+          echo "checksum_file=checksums-v${VERSION}.txt" >> "$GITHUB_OUTPUT"
+          echo "checksum_sha256=checksums-v${VERSION}.txt.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Attach checksums to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ needs.release.outputs.version }}
+          TAG=${{ needs.release.outputs.git_tag }}
+
+          # Upload checksum files to the GitHub Release
+          gh release upload "$TAG" \
+            "checksums-v${VERSION}.txt" \
+            "checksums-v${VERSION}.txt.sha256" \
+            --clobber
+
+      - name: Post deployment summary comment on Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ needs.release.outputs.version }}
+          TAG=${{ needs.release.outputs.git_tag }}
+          BACKEND_DIGEST=${{ steps.build.outputs.digest }}
+
+          COMMENT="## 🚀 Deployment Summary — v${VERSION}
+
+          **Release tag:** \`${TAG}\`
+
+          ### Docker Images
+
+          | Image | Tag | Digest |
+          |-------|-----|--------|
+          | \`ghcr.io/${{ github.repository }}/backend\` | \`${VERSION}\` | \`${BACKEND_DIGEST}\` |
+          | \`ghcr.io/${{ github.repository }}/frontend\` | \`${VERSION}\` | — |
+
+          ### Deployment Commands
+
+          \`\`\`bash
+          # Pull latest images
+          docker pull ghcr.io/${{ github.repository }}/backend:${VERSION}
+          docker pull ghcr.io/${{ github.repository }}/frontend:${VERSION}
+
+          # Deploy to staging (ECS)
+          aws ecs update-service --cluster ai-net-staging --service ai-net-staging-backend \\
+            --force-new-deployment
+
+          # Deploy to production (ECS) — requires explicit approval
+          aws ecs update-service --cluster ai-net-production --service ai-net-production-backend \\
+            --force-new-deployment
+          \`\`\`
+
+          ### Verification
+
+          \`\`\`bash
+          # Verify image digest matches
+          cat checksums-v${VERSION}.txt
+          # Compare against: docker inspect ghcr.io/${{ github.repository }}/backend:${VERSION}
+          \`\`\`
+          "
+
+          gh release edit "$TAG" --notes-file - <<< "$COMMENT" || true
+
+  deploy-staging:
+    name: deploy-staging
+    needs: [release, docker]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_STAGING }}
+          aws-region: us-east-1
+
+      - name: Deploy to ECS staging
+        run: |
+          aws ecs update-service \
+            --cluster ai-net-staging \
+            --service ai-net-staging-backend \
+            --force-new-deployment \
+            --output text
+
+          echo "Waiting for deployment to stabilise..."
+          aws ecs wait services-stable \
+            --cluster ai-net-staging \
+            --services ai-net-staging-backend
+
+          echo "✅ Staging deployment complete for v${{ needs.release.outputs.version }}"

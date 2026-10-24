@@ -12,7 +12,11 @@ import {
   KNOWN_FLAGS,
   type FeatureFlag,
 } from "../../services/featureFlags";
-import { NotFoundError, ValidationError } from "../../errors";
+import { NotFoundError } from "../../errors";
+import { z } from "zod";
+import { validate } from "../middleware/validate";
+
+const setFlagSchema = z.object({ enabled: z.boolean() }).strict();
 
 export function createFlagsRouter(): Router {
   const router = Router();
@@ -21,20 +25,14 @@ export function createFlagsRouter(): Router {
     res.json({ flags: getAllFlags() });
   });
 
-  router.put("/:flag", (req: Request, res: Response) => {
+  router.put("/:flag", validate(setFlagSchema), (req: Request, res: Response) => {
     const flag = req.params.flag as FeatureFlag;
 
     if (!(KNOWN_FLAGS as readonly string[]).includes(flag)) {
       throw new NotFoundError("Feature flag", flag);
     }
 
-    const { enabled } = req.body as { enabled?: unknown };
-    if (typeof enabled !== "boolean") {
-      throw new ValidationError('Body must include { "enabled": true | false }', {
-        field: "enabled",
-        received: typeof enabled,
-      });
-    }
+    const { enabled } = req.body as z.infer<typeof setFlagSchema>;
 
     setFlag(flag, enabled);
     res.json({ flag, enabled, source: "runtime" });

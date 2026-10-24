@@ -1,7 +1,25 @@
+.statsSection {
+  width: 100%;
+}
+
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+}
+
+/* Tablet: force 2-column KPI layout at 768px–1023px */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile: single column */
+@media (max-width: 767px) {
+  .kpis {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpiSkeleton {

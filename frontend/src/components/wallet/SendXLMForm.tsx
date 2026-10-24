@@ -5,20 +5,12 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
+import { useToast } from '../../hooks/useToast'
 import { signTransactionWithFreighter } from '../../services/freighter'
 import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
-
-function isValidStellarAddress(address: string): boolean {
-  try {
-    Keypair.fromPublicKey(address)
-    return true
-  } catch {
-    return false
-  }
-}
 
 interface ConfirmationData {
   destination: string
@@ -32,11 +24,6 @@ export function SendXLMForm() {
   const { balance } = useWalletBalance(publicKey)
   const { showToast } = useToast()
 
-  const [destination, setDestination] = useState('')
-  const [amount, setAmount] = useState('')
-  const [memo, setMemo] = useState('')
-  const [errors, setErrors] = useState<{ destination?: string; amount?: string }>({})
-  const [touched, setTouched] = useState<{ destination?: boolean; amount?: boolean }>({})
   const [confirmation, setConfirmation] = useState<ConfirmationData | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [successTx, setSuccessTx] = useState<string | null>(null)
@@ -70,9 +57,9 @@ export function SendXLMForm() {
 
   const handleSendClick = (data: WalletTransferValues) => {
     setConfirmation({
-      destination: destination.trim(),
-      amount,
-      memo: memo.trim(),
+      destination: data.destination.trim(),
+      amount: String(data.amount),
+      memo: (data.memo ?? '').trim(),
     })
   }
 
@@ -197,10 +184,12 @@ export function SendXLMForm() {
             type="text"
             placeholder="GABCD...1234"
             disabled={Boolean(successTx) || submitting}
+            aria-describedby={errors.destination ? 'destination-error' : undefined}
+            aria-invalid={Boolean(errors.destination)}
             {...register('destination')}
           />
           {errors.destination && (
-            <p id="destination-error" className={styles.error} role="alert">
+            <p id="destination-error" className={styles.error} role="alert" aria-live="polite">
               {errors.destination.message}
             </p>
           )}
@@ -218,13 +207,15 @@ export function SendXLMForm() {
             min="0"
             placeholder="0.0"
             disabled={Boolean(successTx) || submitting}
+            aria-describedby={errors.amount ? 'amount-error' : 'amount-helper'}
+            aria-invalid={Boolean(errors.amount)}
             {...register('amount')}
           />
-          <p className={styles.helper}>
+          <p id="amount-helper" className={styles.helper}>
             {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
           </p>
           {errors.amount && (
-            <p id="amount-error" className={styles.error} role="alert">
+            <p id="amount-error" className={styles.error} role="alert" aria-live="polite">
               {errors.amount.message}
             </p>
           )}

@@ -422,24 +422,25 @@ function getBucketLabel(date: Date): string {
 }
 
 import { EmptyState as CommonEmptyState } from '../common/EmptyState';
-import { Plus, History } from 'lucide-react';
+import { TasksEmptyIllustration, SearchEmptyIllustration } from '../common/illustrations';
+import { Plus } from 'lucide-react';
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
 const EmptyState: React.FC<{ hasFilters: boolean }> = ({ hasFilters }) => (
   <CommonEmptyState
-    icon={hasFilters ? <Clock size={32} /> : <History size={32} />}
+    illustration={hasFilters ? <SearchEmptyIllustration /> : <TasksEmptyIllustration />}
     title={hasFilters ? 'No tasks match the current filters' : 'No task history yet'}
     description={
       hasFilters
-        ? 'Try adjusting the filters or expanding the date range.'
+        ? 'Try different filters or expand the date range to see results.'
         : 'Submit a task to see execution steps, agent timelines, and cost breakdowns here.'
     }
     primaryAction={
       hasFilters
         ? undefined
         : {
-            label: 'Submit New Task',
+            label: 'Submit Your First Task',
             to: '/tasks/new',
             icon: <Plus size={16} />,
           }

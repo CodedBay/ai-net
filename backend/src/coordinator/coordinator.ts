@@ -4,6 +4,8 @@ import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
 import { updateNode, updateTask, getTask } from './taskStore';
+import { createTaskDb, getTaskDb } from '../db/tasks';
+import { TaskResultStorageService } from '../services/taskResultStorage';
 import type { DAGNode, Task } from '../types/task';
 import {
   QualityScorer,
@@ -22,6 +24,7 @@ import {
   runWithTraceContext,
   childSpanContext,
 } from '../services/traceContext';
+import { metricsService } from '../services/metrics';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -112,6 +115,14 @@ function sortByCost(agents: AgentRegistration[]): AgentRegistration[] {
   return [...agents].sort((a, b) => a.cost - b.cost);
 }
 
+/**
+ * Orchestrates multi-agent task execution across a directed acyclic graph (DAG)
+ * of nodes.
+ *
+ * The coordinator resolves agent dependencies, dispatches nodes to specialised
+ * agents, tracks concurrency limits, manages payments via {@link PaymentService},
+ * and emits real-time progress events onto the {@link eventBus}.
+ */
 export class Coordinator {
   private readonly bus: typeof eventBus;
   private readonly limiter: ConcurrencyLimiter;
@@ -138,6 +149,20 @@ export class Coordinator {
     this.correlationId = options.correlationId ?? currentTraceId() ?? '';
   }
 
+  /**
+   * Executes a DAG of agent nodes, respecting dependency ordering and
+   * concurrency limits.
+   *
+   * Nodes whose dependencies have all completed are dispatched immediately up
+   * to the configured concurrency limit. A W3C trace context is established
+   * (or inherited) so all spans share the same `traceId`.
+   *
+   * @param taskId - Unique identifier of the task being executed.
+   * @param dag - Ordered list of {@link DAGNode} objects describing the work graph.
+   * @param onProgress - Optional callback invoked with a 0–100 percentage value
+   *   as nodes complete.
+   * @returns A promise that resolves when all nodes have settled (completed or failed).
+   */
   async executeDAG(
     taskId: string,
     dag: DAGNode[],
@@ -221,6 +246,13 @@ export class Coordinator {
           taskId,
           timestamp: now(),
         });
+
+        // Record task failure metric with reason
+        if (status === 'failed') {
+          const firstFailedNode = dag.find(n => n.status === 'failed');
+          const reason = firstFailedNode?.error ?? 'execution_failed';
+          metricsService.recordTaskFailed(reason);
+        }
 
         this.log.info(
           { taskId, status, completedCount: completed.size, failedCount: failed.size },
@@ -320,7 +352,30 @@ export class Coordinator {
     });
   }
 
-  async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration): Promise<unknown> {
+  /**
+   * Dispatches a single DAG node to the cheapest available agent that handles
+   * the node's type.
+   *
+   * Propagates the correlation ID and a W3C `traceparent` header to the
+   * downstream agent. Server errors (5xx) are wrapped in a retryable error;
+   * client errors (4xx) and timeouts produce non-retryable or retryable errors
+   * respectively.
+   *
+   * @param node - The DAG node to execute.
+   * @param context - Serialised results of upstream dependency nodes, provided
+   *   as context to the agent.
+   * @param agent - Optional pre-resolved agent registration. When omitted the
+   *   cheapest online agent for `node.type` is resolved automatically.
+   * @returns The parsed JSON response body from the agent.
+   * @throws {@link RetryableAgentError} on 5xx responses, timeouts, or transient network errors.
+   * @throws {@link NonRetryableAgentError} on 4xx responses.
+   */
+  async dispatchNode(
+    node: DAGNode,
+    context: string,
+    agent?: AgentRegistration,
+    parentSpanId?: string,
+  ): Promise<unknown> {
     const target = agent ?? await this.cheapestAgentFor(node.type);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -333,7 +388,7 @@ export class Coordinator {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.correlationId) {
       headers['X-Correlation-ID'] = this.correlationId;
-      const currentSpan = currentSpanId();
+      const currentSpan = parentSpanId ?? currentSpanId();
       if (currentSpan) {
         headers['traceparent'] = `00-${padTraceId(this.correlationId)}-${dehyphenate(currentSpan)}-01`;
       }
@@ -343,7 +398,7 @@ export class Coordinator {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ node, context }),
+        body: JSON.stringify({ node, context, traceparent: headers['traceparent'] }),
         signal: controller.signal,
       });
 
@@ -375,6 +430,7 @@ export class Coordinator {
     node: DAGNode,
     nodeById: Map<string, DAGNode>
   ): Promise<'completed' | 'failed'> {
+    const nodeStartedAt = Date.now();
     node.status = 'running';
     updateNode(taskId, node.nodeId, { status: 'running' });
     this.bus.emit(taskId, {
@@ -385,12 +441,15 @@ export class Coordinator {
     });
 
     // Open a per-node tracing span.
+    const nodeContext = this.contextFor(node, nodeById);
+    const inputSizeBytes = Buffer.byteLength(`${node.prompt ?? ''}${nodeContext}`, 'utf8');
     const nodeSpan = this.correlationId
       ? tracingService.startSpan(this.correlationId, 'coordinator', 'node_execution', {
           taskId,
           nodeId: node.nodeId,
           agentType: node.type,
-        })
+          inputSizeBytes,
+        }, currentSpanId())
       : null;
 
     this.log.info(
@@ -399,14 +458,14 @@ export class Coordinator {
     );
 
     try {
-      const { agentId, result } = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
+      const { agentId, result } = await this.dispatchWithRetry(taskId, node, nodeContext, nodeSpan?.spanId);
 
       node.status = 'completed';
       node.result = result;
 
       // Quality score the output and feed it back into reputation. Best-effort:
       // scoring never fails the node.
-      const quality = this.scoreOutput(taskId, node, result, agentId);
+      const quality = this.scoreOutput(taskId, node, result, agentId, Date.now() - nodeStartedAt);
       if (quality) {
         node.quality = quality;
       }
@@ -433,12 +492,21 @@ export class Coordinator {
         payload: { txHash },
       });
 
+      // Record Stellar payment transaction metric
+      metricsService.recordStellarTransaction('payment');
+      // Record Venice AI call by agent type
+      metricsService.recordVeniceCallByAgentType(node.type, 'success', 0);
+
       this.log.info(
         { taskId, nodeId: node.nodeId, txHash },
         'payment released'
       );
 
-      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'completed', { txHash });
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'completed', {
+        agentId,
+        outputSizeBytes: Buffer.byteLength(JSON.stringify(result) ?? '', 'utf8'),
+        txHash,
+      });
 
       return 'completed';
     } catch (err) {
@@ -458,7 +526,10 @@ export class Coordinator {
         'node failed'
       );
 
-      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', { error: asErrorMessage(err) });
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', {
+        inputSizeBytes,
+        error: asErrorMessage(err),
+      });
 
       return 'failed';
     }
@@ -481,7 +552,8 @@ export class Coordinator {
     taskId: string,
     node: DAGNode,
     result: unknown,
-    agentId?: string
+    agentId?: string,
+    responseTimeMs = 0,
   ): QualityScore | undefined {
     try {
       const quality = this.qualityScorer.scoreForAgentType(result, node.prompt, node.type);
@@ -504,9 +576,14 @@ export class Coordinator {
           relevance: quality.relevance.score,
           format: quality.format.score,
           needsReview: quality.needsReview,
+          responseTimeMs,
           timestamp: quality.timestamp,
         });
-        updateAgentReputation(agentId, reputationDeltaForScore(quality.score));
+        updateAgentReputation(agentId, reputationDeltaForScore(quality.score), {
+          taskId,
+          nodeId: node.nodeId,
+          timestamp: quality.timestamp,
+        });
       }
 
       this.log.info(
@@ -548,7 +625,8 @@ export class Coordinator {
   private async dispatchWithRetry(
     taskId: string,
     node: DAGNode,
-    context: string
+    context: string,
+    parentSpanId?: string,
   ): Promise<{ agentId?: string; result: unknown }> {
     if (this.dispatchOverride) {
       return { result: await this.dispatchOverride(taskId, node, context) };
@@ -560,7 +638,7 @@ export class Coordinator {
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
-        return { agentId: primary.id, result: await this.dispatchNode(node, context, primary) };
+        return { agentId: primary.id, result: await this.dispatchNode(node, context, primary, parentSpanId) };
       } catch (err) {
         lastError = err;
         if (!isRetryable(err)) throw err;
@@ -589,7 +667,7 @@ export class Coordinator {
         },
       });
       try {
-        return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback) };
+        return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback, parentSpanId) };
       } catch (err) {
         lastError = err;
       }
@@ -617,6 +695,16 @@ export class Coordinator {
   }
 }
 
+/**
+ * Convenience wrapper that creates a {@link Coordinator} and immediately
+ * executes the DAG for a given task.
+ *
+ * @param task - The {@link Task} to execute; its `dag` and `id` fields drive execution.
+ * @param dispatch - Custom dispatch function used to send nodes to agents.
+ * @param releasePayment - Function called to release a payment after a node completes.
+ * @param onProgress - Optional callback invoked with a 0–100 completion percentage.
+ * @returns A promise that resolves when the entire DAG has settled.
+ */
 export async function executeDAG(
   task: Task,
   dispatch: DispatchFn,
@@ -636,13 +724,26 @@ export async function executeDAG(
 }
 
 /**
- * Creates a job handler function suitable for JobWorker to execute tasks
- * from the background job queue.
+ * Creates a job handler function suitable for the {@link JobWorker} to execute
+ * tasks from the background job queue.
+ *
+ * The returned handler fetches the task from the task store, resets any
+ * previously-failed nodes so they are retried, then delegates to
+ * {@link executeDAG}. After execution it re-reads the task and throws if any
+ * node is still in a failed state, so the job worker can mark the job failed.
+ *
+ * @param dispatch - Agent dispatch function forwarded to the underlying
+ *   {@link Coordinator}.
+ * @param releasePayment - Payment release function forwarded to the underlying
+ *   {@link Coordinator}.
+ * @returns An async function `(job, updateProgress) => Promise<void>` ready to
+ *   be registered with a {@link JobWorker}.
  */
 export function createTaskJobHandler(
   dispatch: DispatchFn,
   releasePayment: PaymentReleaseFn
 ): (job: Job, updateProgress: (percentage: number) => void) => Promise<void> {
+  const resultStorage = new TaskResultStorageService(createTaskDb(getTaskDb()));
   return async (job: Job, updateProgress: (percentage: number) => void) => {
     const task = getTask(job.taskId);
     if (!task) {
@@ -669,6 +770,9 @@ export function createTaskJobHandler(
     await executeDAG(task, dispatch, releasePayment, updateProgress);
 
     const refreshedTask = getTask(job.taskId);
+    if (refreshedTask?.status === "completed") {
+      await resultStorage.persist(job.taskId, refreshedTask.dag.map(({ nodeId, result }) => ({ nodeId, result })));
+    }
     if (refreshedTask && refreshedTask.status === "failed") {
       const firstErrorNode = refreshedTask.dag.find((n) => n.status === "failed");
       throw new Error(firstErrorNode?.error || "Task execution failed");

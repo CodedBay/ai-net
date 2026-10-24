@@ -1,3 +1,39 @@
+/* Balance change highlight animation — 300ms flash on balance update */
+@keyframes balanceHighlight {
+  0%   { background-color: transparent; }
+  30%  { background-color: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 4px; }
+  100% { background-color: transparent; }
+}
+
+.balanceChanged {
+  animation: balanceHighlight 300ms ease-out forwards;
+}
+
+/* Available balance row */
+.availableBalanceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.availableBalanceAmount {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.availableBalanceLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.reserveNote {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
 .page {
   max-width: 960px;
   margin: 0 auto;
@@ -78,12 +114,12 @@
 }
 
 .connectButton:active:not(:disabled) {
-  background: #4338ca;
+  background: var(--accent);
   transform: scale(0.98);
 }
 
 .connectButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -97,7 +133,7 @@
   width: 100%;
   padding: 10px 16px;
   background: var(--surface-canvas);
-  color: var(--text-inverse);
+  color: var(--text-primary);
   border: none;
   border-radius: var(--radius-lg);
   font-size: 0.875rem;
@@ -111,12 +147,12 @@
 }
 
 .freighterButton:active:not(:disabled) {
-  background: #334155;
+  background: var(--surface-primary);
   transform: scale(0.98);
 }
 
 .freighterButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -177,11 +213,11 @@
 }
 
 .link:active {
-  color: #4f46e5;
+  color: var(--accent-text);
 }
 
 .link:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -245,17 +281,10 @@
   opacity: 0.85;
 }
 
-.balanceSkeleton {
-  height: 40px;
-  width: 200px;
-  background: var(--white-alpha-20);
-  border-radius: var(--radius-lg);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.6; }
+.balanceValueSkeleton {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .balanceError {
@@ -276,16 +305,16 @@
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--text-primary) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 20%, transparent);
   border-radius: 999px;
   font-size: 0.875rem;
   color: inherit;
 }
 
 .balanceChipNative {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: rgba(255, 255, 255, 0.35);
+  background: color-mix(in srgb, var(--text-primary) 25%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 35%, transparent);
 }
 
 .balanceChipAmount {
@@ -380,12 +409,12 @@
 }
 
 .iconButton:active {
-  background: rgba(255, 255, 255, 0.35);
+  background: color-mix(in srgb, var(--text-primary) 35%, transparent);
   transform: scale(0.92);
 }
 
 .iconButton:focus-visible {
-  outline: 2px solid #ffffff;
+  outline: 2px solid var(--border-strong);
   outline-offset: 2px;
 }
 
@@ -411,12 +440,12 @@
 }
 
 .disconnectButton:active {
-  background: rgba(255, 255, 255, 0.35);
+  background: color-mix(in srgb, var(--text-primary) 35%, transparent);
   transform: scale(0.96);
 }
 
 .disconnectButton:focus-visible {
-  outline: 2px solid #ffffff;
+  outline: 2px solid var(--border-strong);
   outline-offset: 2px;
 }
 

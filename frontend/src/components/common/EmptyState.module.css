@@ -11,15 +11,34 @@
 }
 
 .cardVariant {
-  background: var(--bg-surface, rgba(30, 41, 59, 0.5));
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-surface, color-mix(in srgb, var(--surface-black) 50%, transparent));
+  border: 1px solid var(--border-subtle, color-mix(in srgb, var(--text-primary) 8%, transparent));
   border-radius: 1rem;
   backdrop-filter: blur(12px);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--surface-black) 30%, transparent);
 }
 
 .compactVariant {
   padding: 1.75rem 1rem;
+}
+
+.illustrationWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+  animation: illustrationFloat 3s ease-in-out infinite;
+}
+
+@keyframes illustrationFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .illustrationWrapper {
+    animation: none;
+  }
 }
 
 .iconWrapper {
@@ -30,23 +49,23 @@
   width: 4rem;
   height: 4rem;
   border-radius: 1.25rem;
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(168, 85, 247, 0.15));
-  border: 1px solid rgba(168, 85, 247, 0.2);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-info) 10%, transparent), color-mix(in srgb, var(--accent) 15%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   margin-bottom: 1.25rem;
-  box-shadow: 0 0 25px rgba(168, 85, 247, 0.15);
+  box-shadow: 0 0 25px color-mix(in srgb, var(--accent) 15%, transparent);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .container:hover .iconWrapper {
   transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 0 35px rgba(56, 189, 248, 0.25);
+  box-shadow: 0 0 35px color-mix(in srgb, var(--accent-info) 25%, transparent);
 }
 
 .iconGlow {
   position: absolute;
   inset: 0;
   border-radius: 1.25rem;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.3) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent) 0%, transparent 70%);
   filter: blur(8px);
   z-index: 0;
 }
@@ -54,7 +73,7 @@
 .iconContent {
   position: relative;
   z-index: 1;
-  color: var(--accent-cyan, #38bdf8);
+  color: var(--accent-cyan, var(--accent-info));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -64,7 +83,7 @@
   margin: 0 0 0.5rem 0;
   font-size: 1.25rem;
   font-weight: 600;
-  color: var(--text-primary, #f8fafc);
+  color: var(--text-primary, var(--text-inverse));
   letter-spacing: -0.01em;
 }
 
@@ -75,7 +94,7 @@
 .description {
   margin: 0 0 1.5rem 0;
   font-size: 0.9375rem;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--text-secondary, var(--text-muted));
   max-width: 28rem;
   line-height: 1.5;
 }
@@ -101,19 +120,19 @@
   padding: 0.625rem 1.25rem;
   font-size: 0.875rem;
   font-weight: 600;
-  color: #ffffff;
-  background: linear-gradient(135deg, #38bdf8 0%, #8b5cf6 100%);
+  color: var(--text-inverse);
+  background: linear-gradient(135deg, var(--accent-info) 0%, var(--accent) 100%);
   border: none;
   border-radius: 0.75rem;
   cursor: pointer;
   text-decoration: none;
-  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
   transition: all 0.2s ease;
 }
 
 .primaryBtn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 45%, transparent);
   opacity: 0.95;
 }
 
@@ -129,9 +148,9 @@
   padding: 0.625rem 1.25rem;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--text-secondary, #cbd5e1);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  color: var(--text-secondary, var(--text-muted));
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  border: 1px solid var(--border-subtle, color-mix(in srgb, var(--text-primary) 12%, transparent));
   border-radius: 0.75rem;
   cursor: pointer;
   text-decoration: none;
@@ -139,9 +158,9 @@
 }
 
 .secondaryBtn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary, #ffffff);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  color: var(--text-primary, var(--text-inverse));
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
 }
 
 @keyframes fadeIn {

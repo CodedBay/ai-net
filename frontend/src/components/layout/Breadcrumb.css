@@ -53,4 +53,12 @@
   .separator {
     margin: 0 4px;
   }
+
+  .breadcrumb--deep .breadcrumb-home {
+    display: none;
+  }
+
+  .breadcrumb--deep .breadcrumb-home + li .separator {
+    display: none;
+  }
 }

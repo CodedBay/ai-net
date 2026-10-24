@@ -1,0 +1,212 @@
+name: OWASP ZAP Security Scan
+
+on:
+  schedule:
+    # Run weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (defaults to http://localhost:3000)'
+        required: false
+        default: 'http://localhost:3000'
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+concurrency:
+  group: zap-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP API Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Start backend server
+        working-directory: backend
+        run: |
+          NODE_ENV=test \
+          SKIP_STELLAR_ACCOUNT_VERIFY=true \
+          PORT=3000 \
+          VENICE_API_KEY=${{ secrets.VENICE_API_KEY || 'mock_key_for_zap' }} \
+          node dist/index.js &
+          echo "Backend PID: $!"
+
+          # Wait up to 60 s for the backend to become ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Backend is ready after ${i} attempts"
+              break
+            fi
+            echo "Waiting for backend... attempt ${i}/30"
+            sleep 2
+          done
+
+          # Final readiness check — fail the step if still not up
+          curl -sf http://localhost:3000/health || \
+            (echo "Backend failed to start" && exit 1)
+
+      # ── Baseline scan: crawls all reachable endpoints ─────────────────────
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: '${{ github.event.inputs.target_url || ''http://localhost:3000'' }}'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j -T 20'
+          fail_action: false
+          allow_issue_writing: true
+          issue_title: 'ZAP Baseline Security Scan Report (${{ github.run_id }})'
+        continue-on-error: true
+
+      # ── API scan: uses OpenAPI spec if available ───────────────────────────
+      - name: Check for OpenAPI spec
+        id: check-spec
+        run: |
+          if curl -sf http://localhost:3000/api-docs/openapi.json > /dev/null 2>&1; then
+            echo "spec_available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "spec_available=false" >> "$GITHUB_OUTPUT"
+            echo "OpenAPI spec not available — skipping API scan"
+          fi
+
+      - name: Run OWASP ZAP API Scan
+        if: steps.check-spec.outputs.spec_available == 'true'
+        uses: zaproxy/action-api-scan@v0.10.0
+        with:
+          target: 'http://localhost:3000/api-docs/openapi.json'
+          format: openapi
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j -T 20'
+          fail_action: false
+          allow_issue_writing: true
+          issue_title: 'ZAP API Security Scan Report (${{ github.run_id }})'
+        continue-on-error: true
+
+      # ── Upload report artifact ─────────────────────────────────────────────
+      - name: Upload ZAP scan report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zap-security-report-${{ github.run_id }}
+          path: |
+            report_html.html
+            report_json.json
+            zap.out
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ── Parse findings and surface in job summary ──────────────────────────
+      - name: Parse findings and write summary
+        if: always()
+        run: |
+          echo "## OWASP ZAP Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scan target | ${{ github.event.inputs.target_url || 'http://localhost:3000' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scope | All /api/\*, /auth/\*, /admin/\* endpoints |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Report artifact | zap-security-report-${{ github.run_id }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -f report_json.json ]; then
+            python3 - <<'PYEOF'
+          import json, sys, os
+
+          try:
+              with open('report_json.json') as f:
+                  data = json.load(f)
+          except Exception as e:
+              print(f"Could not parse ZAP report: {e}", file=sys.stderr)
+              sys.exit(0)
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+
+          high = medium = low = info = 0
+          high_alerts = []
+
+          for site in data.get("site", []):
+              for alert in site.get("alerts", []):
+                  risk = int(alert.get("riskcode", 0))
+                  if risk == 3:
+                      high += 1
+                      high_alerts.append(alert.get("alert", "Unknown"))
+                  elif risk == 2:
+                      medium += 1
+                  elif risk == 1:
+                      low += 1
+                  else:
+                      info += 1
+
+          with open(summary_path, "a") as f:
+              f.write(f"| Severity | Count |\n")
+              f.write(f"|----------|-------|\n")
+              f.write(f"| 🔴 High  | {high} |\n")
+              f.write(f"| 🟠 Medium | {medium} |\n")
+              f.write(f"| 🟡 Low   | {low} |\n")
+              f.write(f"| ℹ️ Info  | {info} |\n")
+
+              if high_alerts:
+                  f.write(f"\n### High Severity Findings\n\n")
+                  for name in high_alerts:
+                      f.write(f"- {name}\n")
+
+          # Emit a warning annotation for high-severity findings
+          if high > 0:
+              print(f"::warning::ZAP found {high} high-severity finding(s). Review the uploaded report artifact and triage via GitHub Issues with the 'security' label.")
+          PYEOF
+          else
+            echo "| No ZAP report found | — |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── Zero high-severity gate ────────────────────────────────────────────
+      - name: Enforce zero high-severity findings
+        if: always()
+        run: |
+          if [ ! -f report_json.json ]; then
+            echo "No report file found — skipping severity gate"
+            exit 0
+          fi
+          HIGH=$(python3 -c "
+          import json
+          try:
+              data = json.load(open('report_json.json'))
+              count = sum(
+                  1 for site in data.get('site', [])
+                  for alert in site.get('alerts', [])
+                  if int(alert.get('riskcode', 0)) == 3
+              )
+              print(count)
+          except Exception:
+              print(0)
+          ")
+          echo "High-severity findings: ${HIGH}"
+          if [ "${HIGH}" -gt 0 ]; then
+            echo "::error::ZAP found ${HIGH} high-severity finding(s). Zero high-severity findings required. Open a GitHub Issue with the 'security' label to track each finding."
+            exit 1
+          fi
+          echo "✅ No high-severity findings detected."

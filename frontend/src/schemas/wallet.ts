@@ -14,15 +14,18 @@ export const walletTransferSchema = z.object({
   destination: z
     .string()
     .trim()
-    .min(1, 'Destination address is required')
-    .refine(isValidStellarAddress, 'Invalid Stellar address. Must start with G and be 56 characters.'),
+    .min(1, 'Enter the recipient\'s Stellar public key (starts with G, 56 characters).')
+    .refine(
+      isValidStellarAddress,
+      'Enter a valid Stellar public key starting with G (56 characters).',
+    ),
   amount: z
     .preprocess((value) => {
       if (typeof value === 'string') {
         return Number(value);
       }
       return value;
-    }, z.number().min(0.0000001, 'Amount must be a positive number')),
+    }, z.number().min(0.0000001, 'Amount must be greater than 0 — enter a positive number.')),
   memo: z.string().max(28, 'Memo must be 28 characters or less').optional(),
 });
 

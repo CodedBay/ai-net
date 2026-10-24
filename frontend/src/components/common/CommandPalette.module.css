@@ -102,7 +102,7 @@
 }
 
 .closeButton:active {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
   transform: scale(0.92);
 }
 
@@ -229,12 +229,12 @@
 }
 
 .resultItem:active {
-  background: rgba(99, 102, 241, 0.18);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   transform: scale(0.99);
 }
 
 .resultItem:focus-visible {
-  outline: 2px solid rgba(129, 140, 248, 0.8);
+  outline: 2px solid color-mix(in srgb, var(--accent) 80%, transparent);
   outline-offset: -2px;
 }
 
@@ -291,7 +291,7 @@
 /* Fuzzy-match highlight: the characters the query actually matched. */
 .highlight {
   background: transparent;
-  color: #a5b4fc;
+  color: var(--accent-text);
   font-weight: 700;
 }
 
@@ -301,9 +301,9 @@
   gap: 16px;
   align-items: center;
   padding: 8px 16px;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 12%, transparent);
   font-size: 11px;
-  color: rgba(148, 163, 184, 0.45);
+  color: color-mix(in srgb, var(--text-muted) 45%, transparent);
 }
 
 .footer kbd {
@@ -311,9 +311,9 @@
   min-width: 16px;
   padding: 1px 5px;
   margin-right: 2px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 20%, transparent);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
   font-family: inherit;
   font-size: 10px;
   line-height: 1.4;
@@ -321,7 +321,7 @@
 }
 
 .resultItem:focus-visible {
-  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: -2px;
 }
 
@@ -330,8 +330,8 @@
   align-items: center;
   gap: 16px;
   padding: 8px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(15, 23, 42, 0.4);
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 6%, transparent);
+  background: color-mix(in srgb, var(--surface-black) 40%, transparent);
 }
 
 @media (max-width: 640px) {

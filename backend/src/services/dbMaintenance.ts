@@ -27,6 +27,7 @@ import path from "path";
 import fs from "fs";
 import { createLogger } from "../utils/logger";
 import type { Database } from "better-sqlite3";
+import type { TaskResultStorageService } from "./taskResultStorage";
 
 const logger = createLogger({ component: "db-maintenance" });
 
@@ -70,6 +71,8 @@ export interface DbMaintenanceOptions {
   backupDir?: string;
   /** Maximum number of snapshots retained per database. Default: 14. */
   backupRetentionCount?: number;
+  /** Optional task result archival and expiry job. */
+  taskResultStorage?: Pick<TaskResultStorageService, "runRetentionJobs">;
 }
 
 const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -96,6 +99,7 @@ export class DbMaintenanceService {
   private readonly vacuumThreshold: number;
   private readonly backupDir: string;
   private readonly backupRetentionCount: number;
+  private readonly taskResultStorage?: Pick<TaskResultStorageService, "runRetentionJobs">;
   private readonly databases: MaintenanceDb[];
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
@@ -107,6 +111,7 @@ export class DbMaintenanceService {
     this.vacuumThreshold = options.vacuumThreshold ?? DEFAULT_VACUUM_THRESHOLD;
     this.backupRetentionCount = options.backupRetentionCount ?? DEFAULT_BACKUP_RETENTION;
     this.backupDir = options.backupDir ?? path.join(process.cwd(), "backups");
+    this.taskResultStorage = options.taskResultStorage;
   }
 
   start(): void {
@@ -138,6 +143,15 @@ export class DbMaintenanceService {
     const startedAt = Date.now();
     const snapshot = emptyMetrics();
     let backupsDeleted = 0;
+
+    if (this.taskResultStorage) {
+      try {
+        const results = await this.taskResultStorage.runRetentionJobs();
+        logger.info(results, "task result retention pass completed");
+      } catch (error) {
+        logger.error({ err: error }, "task result retention pass failed");
+      }
+    }
 
     for (const db of this.databases) {
       const entry = snapshot.byDatabase[db.name] ?? {

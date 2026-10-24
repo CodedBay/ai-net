@@ -25,6 +25,28 @@ export interface RequestSample {
   durationMs: number;
   /** HTTP status code written to the response. */
   statusCode: number;
+  /** HTTP method (GET, POST, etc.). */
+  method?: string;
+  /** Normalized request path (e.g. /api/tasks). */
+  path?: string;
+}
+
+/** A recorded Stellar transaction for metrics tracking. */
+export interface StellarTransactionRecord {
+  /** Transaction type: payment, create_account, etc. */
+  type: string;
+  /** Epoch milliseconds of the transaction. */
+  timestamp: number;
+}
+
+/** Per-agent health status record. */
+export interface AgentHealthRecord {
+  /** Agent identifier. */
+  agentId: string;
+  /** 1 = healthy, 0 = unhealthy. */
+  status: number;
+  /** Epoch milliseconds of last update. */
+  timestamp: number;
 }
 
 /** Traffic and latency analytics over the rolling metrics window. */

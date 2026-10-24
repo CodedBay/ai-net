@@ -152,12 +152,10 @@ describe('LRUCacheClient', () => {
   });
 
   it('per-item TTL expires the entry', async () => {
-    jest.useFakeTimers();
     const c = new LRUCacheClient(100, 1_000); // default 1s TTL
     await c.set('expiring', 'data', 0.001); // 1ms TTL
-    jest.advanceTimersByTime(100);
+    await new Promise((resolve) => setTimeout(resolve, 25));
     expect(await c.get('expiring')).toBeUndefined();
-    jest.useRealTimers();
   });
 
   it('respects max size by evicting LRU entry', async () => {
@@ -463,7 +461,7 @@ describe('Cache invalidation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. TTL expiry (fake timers)
+// 6. TTL expiry (real timers — lru-cache reads the real clock)
 // ---------------------------------------------------------------------------
 
 describe('TTL expiry', () => {
@@ -472,20 +470,18 @@ describe('TTL expiry', () => {
   });
 
   it('item is unavailable after its TTL elapses', async () => {
-    jest.useFakeTimers();
     // 10ms TTL
     const c = new LRUCacheClient(100, 10);
     await c.set('ttl-test', 'value', 0.01); // 10ms
     expect(await c.get('ttl-test')).toBe('value');
-    jest.advanceTimersByTime(50);
+    await new Promise((resolve) => setTimeout(resolve, 40));
     expect(await c.get('ttl-test')).toBeUndefined();
   });
 
   it('item with longer TTL survives a shorter elapsed time', async () => {
-    jest.useFakeTimers();
     const c = new LRUCacheClient(100, 1_000);
     await c.set('long-lived', 'still-here', 1); // 1s
-    jest.advanceTimersByTime(500); // only 0.5s passed
+    await new Promise((resolve) => setTimeout(resolve, 20)); // only 20ms passed
     expect(await c.get('long-lived')).toBe('still-here');
   });
 });

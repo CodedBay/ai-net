@@ -912,6 +912,7 @@ describe("MetricsService", () => {
 
       service.recordTaskCompletion(1.2);
       service.recordVeniceCall("llama-3.3-70b", "success", 0.35);
+      service.recordStellarSequenceConflict();
       service.setVeniceCircuitBreakerState("open");
       expect(service.getVeniceCircuitBreakerState()).toBe(1);
       service.setVeniceCircuitBreakerState("half-open");
@@ -921,6 +922,7 @@ describe("MetricsService", () => {
 
       const exported = await service.exportPrometheusMetrics();
       expect(exported).toContain("ainet_tasks_duration_seconds_count 1");
+      expect(exported).toContain("stellar_seq_conflicts_total 1");
       expect(exported).toContain('ainet_venice_requests_total{model="llama-3.3-70b",status="success"} 1');
       expect(exported).toContain("ainet_venice_circuit_breaker_state 0");
 

@@ -1,5 +1,5 @@
 import { Suspense } from 'react';
-import { TaskSubmissionForm } from '../../components/agents/TaskSubmissionForm';
+import { TaskSubmissionWizard } from '../../components/tasks/TaskSubmissionWizard';
 import { Skeleton, SkeletonCard, SkeletonText } from '../../components/common/Skeleton';
 
 /**
@@ -53,7 +53,7 @@ export function NewTaskPageSkeleton() {
 export default function NewTaskPage() {
   return (
     <Suspense fallback={<NewTaskPageSkeleton />}>
-      <TaskSubmissionForm />
+      <TaskSubmissionWizard />
     </Suspense>
   );
 }

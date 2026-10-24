@@ -27,6 +27,8 @@
  */
 
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
+import Redis from 'ioredis';
 import type { DAGEvent } from '../types/task';
 import { createEventStore } from '../events/eventStore';
 import type { EventStore } from '../events/eventStore';
@@ -92,6 +94,7 @@ export interface EventBusOptions {
   store?: EventStore;
   /** Maximum number of listeners (default: 100). */
   maxListeners?: number;
+  redisChannel?: string;
 }
 
 class EventBus extends EventEmitter {
@@ -100,6 +103,10 @@ class EventBus extends EventEmitter {
 
   /** Next sequence number to assign per taskId (counter starts at 0). */
   private readonly nextSeqByTask = new Map<string, number>();
+  private readonly seenEventIds = new Set<string>();
+  private readonly redisChannel: string;
+  private redisPublisher?: Redis;
+  private redisSubscriber?: Redis;
 
   /** Underlying append-only event store. */
   readonly store: EventStore;
@@ -109,6 +116,7 @@ class EventBus extends EventEmitter {
   constructor(options: EventBusOptions = {}) {
     super();
     this.store = options.store ?? createEventStore();
+    this.redisChannel = options.redisChannel ?? 'task:events';
     this.setMaxListeners(options.maxListeners ?? 100);
 
     // ── Rehydrate seq counters from the DB ──────────────────────────────────
@@ -149,13 +157,81 @@ class EventBus extends EventEmitter {
     const seq = this.nextSeqByTask.get(taskId) ?? 0;
     this.nextSeqByTask.set(taskId, seq + 1);
     event.seq = seq;
+    const eventId = randomUUID();
+    this.rememberEventId(eventId);
+    const emitted = this.deliver(taskId, event);
+    void this.publish(eventId, event);
+    return emitted;
+  }
 
-    // Notify the persistence recorder FIRST (see constructor), then per-task
-    // subscribers.  The ALL channel listener runs synchronously here before
-    // the per-task emit below, ensuring the row is committed before any
-    // WebSocket handler drains "events since cursor".
+  async connectRedis(redisUrl: string): Promise<void> {
+    if (this.redisPublisher || this.redisSubscriber) return;
+    const retryStrategy = (attempt: number) => Math.min(attempt * 100, 5_000);
+    this.redisPublisher = new Redis(redisUrl, { retryStrategy });
+    this.redisSubscriber = new Redis(redisUrl, { retryStrategy });
+
+    for (const client of [this.redisPublisher, this.redisSubscriber]) {
+      client.on('error', err => this.log.warn({ err }, 'Redis event bus connection error'));
+    }
+    this.redisSubscriber.on('message', (_channel, message) => this.receive(message));
+
+    try {
+      await this.redisSubscriber.subscribe(this.redisChannel);
+      this.log.info({ channel: this.redisChannel }, 'Redis event bus subscribed');
+    } catch (err) {
+      this.log.warn({ err }, 'Redis event bus subscription unavailable; reconnecting');
+    }
+  }
+
+  disconnectRedis(): void {
+    this.redisPublisher?.disconnect();
+    this.redisSubscriber?.disconnect();
+    this.redisPublisher = undefined;
+    this.redisSubscriber = undefined;
+  }
+
+  private deliver(taskId: string, event: DAGEvent): boolean {
     super.emit(EventBus.ALL, event);
     return super.emit(taskId, event);
+  }
+
+  private rememberEventId(eventId: string): boolean {
+    if (this.seenEventIds.has(eventId)) return false;
+    this.seenEventIds.add(eventId);
+    if (this.seenEventIds.size > 10_000) {
+      const oldest = this.seenEventIds.values().next().value as string | undefined;
+      if (oldest) this.seenEventIds.delete(oldest);
+    }
+    return true;
+  }
+
+  private receive(message: string): void {
+    try {
+      const envelope = JSON.parse(message) as { eventId?: unknown; event?: unknown };
+      if (
+        typeof envelope.eventId !== 'string' ||
+        !envelope.event ||
+        typeof envelope.event !== 'object'
+      ) return;
+      const event = envelope.event as DAGEvent;
+      if (typeof event.taskId !== 'string' || typeof event.type !== 'string') return;
+      if (!this.rememberEventId(envelope.eventId)) return;
+      this.deliver(event.taskId, event);
+    } catch (err) {
+      this.log.warn({ err }, 'Ignoring malformed Redis task event');
+    }
+  }
+
+  private async publish(eventId: string, event: DAGEvent): Promise<void> {
+    if (!this.redisPublisher) return;
+    try {
+      await this.redisPublisher.publish(
+        this.redisChannel,
+        JSON.stringify({ eventId, event }),
+      );
+    } catch (err) {
+      this.log.warn({ err, eventId }, 'Failed to publish task event to Redis');
+    }
   }
 
   subscribe(taskId: string, handler: (e: DAGEvent) => void): () => void {

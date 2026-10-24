@@ -1,0 +1,57 @@
+# monitoring/grafana/provisioning/alerting/notification-policies.yml
+#
+# Grafana Alertmanager notification policy (routing tree).
+# Routes P1 alerts to PagerDuty, P2/P3 to Slack.
+#
+# Route hierarchy:
+#   root → catch-all (default: slack-p2-incidents)
+#     ├── severity=P1 → pagerduty-p1
+#     ├── severity=P2 → slack-p2-incidents
+#     └── severity=P3 → slack-p3-ops
+
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: slack-p2-incidents   # default catch-all
+    group_by:
+      - alertname
+      - service
+      - severity
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+    routes:
+      # ── P1: page immediately via PagerDuty ──────────────────────────────────
+      - receiver: pagerduty-p1
+        object_matchers:
+          - - severity
+            - =
+            - P1
+        group_wait: 0s          # no delay for P1
+        group_interval: 1m
+        repeat_interval: 30m    # re-page every 30 min until resolved
+        continue: false
+
+      # ── P2: notify #incidents Slack channel ─────────────────────────────────
+      - receiver: slack-p2-incidents
+        object_matchers:
+          - - severity
+            - =
+            - P2
+        group_wait: 1m
+        group_interval: 5m
+        repeat_interval: 2h
+        continue: false
+
+      # ── P3: low-urgency ops channel ─────────────────────────────────────────
+      - receiver: slack-p3-ops
+        object_matchers:
+          - - severity
+            - =
+            - P3
+        group_wait: 5m
+        group_interval: 15m
+        repeat_interval: 24h
+        continue: false

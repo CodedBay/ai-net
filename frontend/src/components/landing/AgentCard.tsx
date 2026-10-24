@@ -1,9 +1,9 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { formatNumber } from '../../utils/format'
-import { cardEntrance } from '../../utils/animationPresets'
-import { Star } from 'lucide-react'
+import { agentCardPress, cardEntrance, selectionBadge } from '../../utils/animationPresets'
+import { Check, Star } from 'lucide-react'
 
 export interface AgentData {
   id: string
@@ -22,6 +22,8 @@ export interface AgentData {
 interface AgentCardProps {
   agent: AgentData
   index: number
+  selected?: boolean
+  onSelect?: (agent: AgentData) => void
 }
 
 function formatHeartbeatAge(lastHeartbeat?: number): string {
@@ -36,26 +38,61 @@ function formatHeartbeatAge(lastHeartbeat?: number): string {
   return `${hours}h ago`
 }
 
-function CapabilityBadges({ capabilities }: { capabilities: string[] }) {
-  const badgeColors: Record<string, string> = {
-    research: 'bg-[#60A5FA]/15 text-[#60A5FA] border-[#60A5FA]/30',
-    risk: 'bg-[#FBBF24]/15 text-[#FBBF24] border-[#FBBF24]/30',
-    coding: 'bg-[#34D399]/15 text-[#34D399] border-[#34D399]/30',
-    design: 'bg-[#C084FC]/15 text-[#C084FC] border-[#C084FC]/30',
-    report: 'bg-[#F87171]/15 text-[#F87171] border-[#F87171]/30',
-  }
+const capabilityTokens: Record<string, { color: string; surface: string; border: string }> = {
+  research: {
+    color: 'var(--agent-research)',
+    surface: 'var(--agent-research-surface)',
+    border: 'var(--agent-research-border)',
+  },
+  risk: {
+    color: 'var(--agent-risk)',
+    surface: 'var(--agent-risk-surface)',
+    border: 'var(--agent-risk-border)',
+  },
+  coding: {
+    color: 'var(--agent-coding)',
+    surface: 'var(--agent-coding-surface)',
+    border: 'var(--agent-coding-border)',
+  },
+  design: {
+    color: 'var(--agent-design)',
+    surface: 'var(--agent-design-surface)',
+    border: 'var(--agent-design-border)',
+  },
+  report: {
+    color: 'var(--agent-report)',
+    surface: 'var(--agent-report-surface)',
+    border: 'var(--agent-report-border)',
+  },
+}
 
+function CapabilityBadges({ capabilities }: { capabilities: string[] }) {
   return (
     <div className="flex flex-wrap gap-1.5 mb-3">
-      {capabilities.map((cap) => (
-        <span
-          key={cap}
-          className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${badgeColors[cap] || 'bg-text-secondary/10 text-text-secondary border-text-secondary/30'}`}
-          title={cap}
-        >
-          {cap}
-        </span>
-      ))}
+      {capabilities.map((cap) => {
+        const tokens = capabilityTokens[cap]
+        const badgeStyle: React.CSSProperties = tokens
+          ? {
+              color: tokens.color,
+              backgroundColor: tokens.surface,
+              borderColor: tokens.border,
+            }
+          : {
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--agent-default-surface)',
+              borderColor: 'var(--agent-default-border)',
+            }
+        return (
+          <span
+            key={cap}
+            className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border"
+            style={badgeStyle}
+            title={cap}
+          >
+            {cap}
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -68,27 +105,53 @@ function ReputationStars({ rating }: { rating: number }) {
         <Star
           key={i}
           size={10}
-          className={i < stars ? 'text-[#FBBF24] fill-[#FBBF24]' : 'text-text-secondary/30'}
+          className={i < stars ? 'text-warning fill-warning' : 'text-text-secondary/30'}
         />
       ))}
     </div>
   )
 }
 
-const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
+const AgentCard: React.FC<AgentCardProps> = ({ agent, index, selected = false, onSelect }) => {
   const { t, i18n } = useTranslation()
+  const prefersReducedMotion = useReducedMotion()
   const isOnline = agent.isOnline ?? true
   const capabilities = agent.capabilities ?? []
 
   return (
     <motion.div
-      className="bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col cursor-pointer group relative overflow-hidden"
-      variants={cardEntrance(index)}
-      initial="hidden"
-      whileInView="visible"
+      className={`agent-card-interactive bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col group relative overflow-hidden ${onSelect ? 'cursor-pointer' : ''} ${selected ? 'agent-card-selected' : ''}`}
+      variants={prefersReducedMotion ? undefined : cardEntrance(index)}
+      initial={prefersReducedMotion ? false : 'hidden'}
+      whileInView={prefersReducedMotion ? undefined : 'visible'}
       viewport={{ once: true, margin: '-30px' }}
-      whileHover={{ y: -4 }}
+      whileHover={prefersReducedMotion ? undefined : { y: -2, transition: { duration: 0.15, ease: 'easeOut' } }}
+      whileTap={onSelect && !prefersReducedMotion ? agentCardPress : undefined}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-pressed={onSelect ? selected : undefined}
+      onClick={onSelect ? () => onSelect(agent) : undefined}
+      onKeyDown={onSelect ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect(agent)
+        }
+      } : undefined}
     >
+      <AnimatePresence>
+        {selected && (
+          <motion.span
+            className="agent-card-selection-badge"
+            variants={prefersReducedMotion ? undefined : selectionBadge}
+            initial={prefersReducedMotion ? false : 'hidden'}
+            animate="visible"
+            exit={prefersReducedMotion ? undefined : 'exit'}
+            aria-label="Selected for comparison"
+          >
+            <Check size={14} aria-hidden="true" />
+          </motion.span>
+        )}
+      </AnimatePresence>
       <div className="absolute inset-0 bg-gradient-primary opacity-0 group-hover:opacity-[0.03] transition-opacity duration-500" />
       <div className="absolute -inset-px rounded-2xl border border-accent-cyan/0 group-hover:border-accent-cyan/30 transition-all duration-500 pointer-events-none" />
 
@@ -121,7 +184,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
           <div
             className={`w-2.5 h-2.5 rounded-full relative ${
               isOnline
-                ? 'bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)]'
+                ? 'bg-accent-green shadow-success-glow'
                 : 'bg-text-secondary/40'
             }`}
           >

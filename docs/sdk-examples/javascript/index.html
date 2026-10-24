@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ai-net browser examples</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">AI-NET / BROWSER CLIENT</p>
+        <h1>Task console</h1>
+        <button id="connect" type="button">Connect Freighter</button>
+        <p id="wallet" role="status">Wallet not connected</p>
+      </header>
+      <section aria-labelledby="submit-heading">
+        <h2 id="submit-heading">Submit a task</h2>
+        <form id="task-form">
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" required rows="4" maxlength="10000"></textarea>
+          <button type="submit">Submit task</button>
+        </form>
+      </section>
+      <section aria-labelledby="stream-heading">
+        <h2 id="stream-heading">Task updates</h2>
+        <pre id="events" aria-live="polite">No task selected</pre>
+      </section>
+      <section aria-labelledby="payments-heading">
+        <h2 id="payments-heading">Payment history</h2>
+        <button id="load-payments" type="button">Refresh payments</button>
+        <ul id="payments"></ul>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

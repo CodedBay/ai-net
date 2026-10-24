@@ -1,0 +1,228 @@
+{
+  "id": null,
+  "uid": "ai-net-redis",
+  "title": "Redis Monitoring — ai-net",
+  "tags": ["redis", "monitoring", "ai-net"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Memory Used",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes{instance=~\"redis.*\"}",
+          "legendFormat": "Memory Used"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 838860800 },
+              { "color": "red", "value": 1073741824 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Memory Usage %",
+      "type": "gauge",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "100 * redis_memory_used_bytes{instance=~\"redis.*\"} / redis_memory_max_bytes{instance=~\"redis.*\"}",
+          "legendFormat": "Memory %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Total Keys",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(redis_db_keys{instance=~\"redis.*\"})",
+          "legendFormat": "Total Keys"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Connected Clients",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "redis_connected_clients{instance=~\"redis.*\"}",
+          "legendFormat": "Clients"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Commands Per Second",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(redis_commands_processed_total{instance=~\"redis.*\"}[1m])",
+          "legendFormat": "Cmds/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Memory Usage Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes{instance=~\"redis.*\"}",
+          "legendFormat": "Used"
+        },
+        {
+          "expr": "redis_memory_max_bytes{instance=~\"redis.*\"}",
+          "legendFormat": "Max (noeviction limit)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Keyspace Hits vs Misses",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "rate(redis_keyspace_hits_total{instance=~\"redis.*\"}[1m])",
+          "legendFormat": "Hits/s"
+        },
+        {
+          "expr": "rate(redis_keyspace_misses_total{instance=~\"redis.*\"}[1m])",
+          "legendFormat": "Misses/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      }
+    },
+    {
+      "id": 8,
+      "title": "AOF / RDB Persistence",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "redis_aof_enabled{instance=~\"redis.*\"}",
+          "legendFormat": "AOF Enabled"
+        },
+        {
+          "expr": "redis_rdb_last_bgsave_status{instance=~\"redis.*\"}",
+          "legendFormat": "Last RDB Save OK"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "Disabled" }, "1": { "text": "Enabled" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "alerting": {
+    "alerts": [
+      {
+        "uid": "redis-memory-alert",
+        "title": "Redis Memory > 80%",
+        "condition": "A",
+        "data": [
+          {
+            "refId": "A",
+            "queryType": "",
+            "relativeTimeRange": { "from": 300, "to": 0 },
+            "model": {
+              "expr": "100 * redis_memory_used_bytes / redis_memory_max_bytes > 80",
+              "intervalMs": 1000,
+              "maxDataPoints": 43200
+            }
+          }
+        ],
+        "noDataState": "NoData",
+        "execErrState": "Alerting",
+        "for": "5m",
+        "annotations": {
+          "summary": "Redis memory usage exceeded 80% threshold",
+          "description": "Redis on {{ $labels.instance }} is using {{ $values.A }}% of its memory limit. With maxmemory-policy=noeviction, new writes will be rejected when memory is full."
+        },
+        "labels": {
+          "severity": "warning",
+          "service": "redis"
+        }
+      }
+    ]
+  }
+}

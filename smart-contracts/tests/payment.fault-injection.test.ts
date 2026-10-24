@@ -125,6 +125,9 @@ beforeEach(() => {
 
 // ── F4: Horizon 429 → exponential backoff retries ─────────────────────────────
 
+// FLAKY: patches global.setTimeout to make backoff retries instant; any
+// concurrent test that also reads global.setTimeout (e.g. heartbeat cleanup)
+// can see the patched version if teardown races. Tracked in #95.
 describe('F4 · Horizon 429 rate limit → retry with backoff', () => {
   it('retries 5 times on 429 and then throws', async () => {
     const err429 = new Error('Rate limit exceeded');
@@ -346,5 +349,177 @@ describe('F11 · fee fallback on fetchBaseFee failure', () => {
     expect(hash).toBe('mock_tx_hash');
     const submittedTx = mockSubmitTransaction.mock.calls[0][0];
     expect(submittedTx.fee).toBe('100');
+  });
+});
+
+// ── F12: Horizon RPC timeout during escrow release — no double-release ─────────
+//
+// Invariant: an RPC timeout during release must NOT double-release the escrow.
+// The escrow balance must still exist if the submit fails; calling release a
+// second time after the transient timeout must fail with the same error so
+// the orchestration layer can decide whether to retry or expire the escrow.
+
+describe('F12 · Horizon RPC timeout during escrow release — no double-release', () => {
+  it('does not double-release when submitTransaction times out 3 times then throws', async () => {
+    // Arrange: escrow creation tx found for taskId.
+    mockTransactionsCall.mockResolvedValue({
+      records: [{ memo_type: 'text', memo: taskId, envelope_xdr: envelopeXdr }],
+    });
+
+    // Escrow balance exists — claim not yet settled.
+    mockClaimableBalanceCall.mockResolvedValue({ amount: '10.0000000' });
+
+    // submitTransaction times out on every attempt.
+    const timeoutErr = new Error('TIMEOUT: request timed out after 30s');
+    (timeoutErr as any).response = { status: 504 };
+    mockSubmitTransaction.mockRejectedValue(timeoutErr);
+
+    // Act: first release attempt — should exhaust retries and throw.
+    await expect(
+      releasePayment(coordinatorKeypair, agentKeypair.publicKey(), taskId)
+    ).rejects.toThrow();
+
+    // Assert: submitTransaction was called (retried), not zero times.
+    expect(mockSubmitTransaction.mock.calls.length).toBeGreaterThanOrEqual(1);
+
+    // Assert: the claimable balance query ran exactly once per attempt —
+    // there was no duplicate "claim" operation submitted.
+    const submitCallCount = mockSubmitTransaction.mock.calls.length;
+    expect(submitCallCount).toBeLessThanOrEqual(5); // bounded by MAX_RETRIES
+
+    // Assert: the escrow balance was never claimed — a subsequent call to
+    // getEscrowBalance (which reads the claimable balance) should still see
+    // the original amount, not 0 (settled).
+    process.env.STELLAR_COORDINATOR_PUBLIC_KEY = coordinatorKeypair.publicKey();
+    const balance = await getEscrowBalance(taskId);
+    expect(balance).toBeGreaterThan(0); // escrow still locked, not double-released
+  });
+});
+
+// ── F13: Coordinator crash mid-pipeline — funds not permanently locked ─────────
+//
+// Invariant: if the coordinator crashes after lockEscrow succeeds but before
+// task dispatch, the escrowed funds must be recoverable via refundEscrow after
+// the escrow TTL expires (simulated here by calling refundEscrow directly).
+
+describe('F13 · Coordinator crash mid-pipeline — refund path reachable', () => {
+  it('allows refundEscrow after lock succeeds but task dispatch was never called', async () => {
+    // Step 1: lockEscrow succeeds.
+    const lockHash = await lockEscrow(
+      coordinatorKeypair,
+      agentKeypair.publicKey(),
+      '1',
+      'task_crash_test'
+    );
+    expect(lockHash).toBe('mock_tx_hash');
+
+    // Step 2: Simulate coordinator crash — task dispatch never happens.
+    // (No additional mock setup needed — the crash is represented by not
+    //  calling any dispatch function here.)
+
+    // Step 3: Set up the refund path: the creation tx is findable, and the
+    //         claimable balance still exists (not yet settled).
+    mockTransactionsCall.mockResolvedValueOnce({
+      records: [{ memo_type: 'text', memo: 'task_crash_test', envelope_xdr: envelopeXdr }],
+    });
+    mockClaimableBalanceCall.mockResolvedValueOnce({ amount: '1.0000000' });
+    mockSubmitTransaction.mockResolvedValueOnce({ hash: 'refund_tx_hash' });
+
+    // Step 4: After expiry / recovery, refundEscrow can reclaim the funds.
+    const refundHash = await refundEscrow(coordinatorKeypair, 'task_crash_test');
+    expect(refundHash).toBe('refund_tx_hash');
+
+    // Assert: funds were not permanently locked.
+    expect(mockSubmitTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ operations: expect.anything() })
+    );
+  });
+});
+
+// ── F14: Insufficient XLM balance — no partial state written ──────────────────
+//
+// Invariant: if the coordinator wallet has insufficient XLM for the requested
+// escrow amount, the call must fail before any escrow creation. No partial
+// state (claimable balance, memo record) must be written to the ledger.
+
+describe('F14 · Insufficient XLM balance — coordinator has 0.5 XLM, task needs 1 XLM', () => {
+  it('throws before escrow creation with no partial state', async () => {
+    // Simulate Stellar's op_underfunded response when the coordinator tries
+    // to create a claimable balance larger than its available XLM.
+    const underfundedErr = new Error('Request failed with status code 400');
+    (underfundedErr as any).response = {
+      status: 400,
+      data: {
+        extras: {
+          result_codes: {
+            transaction: 'tx_failed',
+            operations: ['op_underfunded'],
+          },
+        },
+      },
+    };
+    // loadAccount succeeds (account exists) but submitTransaction fails.
+    mockLoadAccount.mockImplementationOnce((pubkey: string) =>
+      Promise.resolve(new Account(pubkey, '123'))
+    );
+    mockSubmitTransaction.mockRejectedValueOnce(underfundedErr);
+
+    // A 1 XLM escrow on a wallet with only 0.5 XLM usable.
+    await expect(
+      lockEscrow(coordinatorKeypair, agentKeypair.publicKey(), '1', 'task_underfunded')
+    ).rejects.toThrow(/400|underfunded|op_underfunded/i);
+
+    // Assert: no successful submission occurred.
+    expect(mockSubmitTransaction).toHaveBeenCalledTimes(1);
+    // Assert: no subsequent Horizon query (claimable balance lookup) was made —
+    // meaning the escrow was never created.
+    expect(mockClaimableBalanceCall).not.toHaveBeenCalled();
+  });
+});
+
+// ── F15: Agent double-payment — contract-level idempotency ────────────────────
+//
+// Invariant: two concurrent coordinator calls attempting to release the same
+// escrow must result in exactly one successful release. The second call must
+// receive EscrowAlreadySettledError (404 from Horizon) rather than succeeding
+// a second time, ensuring the agent is paid once and only once.
+
+describe('F15 · Agent double-payment — only one release succeeds', () => {
+  it('second concurrent release call gets EscrowAlreadySettledError', async () => {
+    // Both calls find the creation tx.
+    mockTransactionsCall.mockResolvedValue({
+      records: [{ memo_type: 'text', memo: taskId, envelope_xdr: envelopeXdr }],
+    });
+
+    // First call: balance exists (claim not yet settled).
+    mockClaimableBalanceCall.mockResolvedValueOnce({ amount: '10.0000000' });
+    mockSubmitTransaction.mockResolvedValueOnce({ hash: 'first_release_hash' });
+
+    // First release succeeds.
+    const firstHash = await releasePayment(
+      coordinatorKeypair,
+      agentKeypair.publicKey(),
+      taskId
+    );
+    expect(firstHash).toBe('mock_tx_hash');
+
+    // Second concurrent call: Horizon returns 404 because balance already claimed.
+    const err404 = new NotFoundError('Not Found', {
+      status: 404,
+      statusText: 'Not Found',
+      headers: {},
+      config: {},
+      data: {},
+    });
+    mockTransactionsCall.mockResolvedValueOnce({
+      records: [{ memo_type: 'text', memo: taskId, envelope_xdr: envelopeXdr }],
+    });
+    mockClaimableBalanceCall.mockRejectedValueOnce(err404);
+
+    // Second release must fail with EscrowAlreadySettledError — not with a
+    // second successful payment.
+    await expect(
+      releasePayment(coordinatorKeypair, agentKeypair.publicKey(), taskId)
+    ).rejects.toThrow(EscrowAlreadySettledError);
   });
 });

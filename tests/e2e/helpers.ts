@@ -56,7 +56,8 @@ class SorobanContractEmulator {
       name: record.id,
       capability: record.capability,
       priceXLM: record.priceStroops / 10_000_000,
-      stellarAddress: record.ownerAddress
+      stellarAddress: record.ownerAddress,
+      reputationScore: 1
     });
     return record;
   }
@@ -187,4 +188,111 @@ export function resetTestDatabase(): void {
   } catch (e) {
     // ignore
   }
+}
+
+// ── Stellar Testnet Helpers ─────────────────────────────────────────────────
+
+const HORIZON_URL = process.env.STELLAR_HORIZON_URL ?? "https://horizon-testnet.stellar.org";
+const FRIENDBOT_URL = "https://friendbot.stellar.org";
+
+/**
+ * Fund a testnet account via Friendbot.
+ * Throws if Friendbot returns a non-2xx response.
+ */
+export async function fundTestnetAccount(address: string): Promise<void> {
+  const resp = await fetch(`${FRIENDBOT_URL}?addr=${encodeURIComponent(address)}`);
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => String(resp.status));
+    throw new Error(`Friendbot funding failed for ${address}: ${resp.status} — ${body}`);
+  }
+}
+
+/**
+ * Get the native XLM balance of a Stellar account from Horizon.
+ * Returns 0 if the account does not exist yet.
+ */
+export async function getWalletBalance(address: string): Promise<number> {
+  const resp = await fetch(`${HORIZON_URL}/accounts/${encodeURIComponent(address)}`);
+  if (resp.status === 404) return 0;
+  if (!resp.ok) throw new Error(`Horizon account fetch failed for ${address}: ${resp.status}`);
+  const data = await resp.json() as { balances?: Array<{ asset_type: string; balance: string }> };
+  const native = data.balances?.find((b) => b.asset_type === "native");
+  return native ? parseFloat(native.balance) : 0;
+}
+
+/**
+ * Poll Horizon for payment transactions to the given address.
+ * Returns true when at least one transaction is found, false on timeout.
+ *
+ * @param agentAddress  — Stellar address to check
+ * @param retries       — number of polling attempts (default 10)
+ * @param delayMs       — delay between attempts in ms (default 5000)
+ */
+export async function pollHorizonTransactions(
+  agentAddress: string,
+  retries = 10,
+  delayMs = 5_000,
+): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const resp = await fetch(
+        `${HORIZON_URL}/transactions?account=${encodeURIComponent(agentAddress)}&order=desc&limit=10`,
+      );
+      if (resp.ok) {
+        const data = await resp.json() as { _embedded?: { records?: unknown[] } };
+        if ((data._embedded?.records?.length ?? 0) > 0) return true;
+      }
+    } catch {
+      // network error — retry
+    }
+    if (i < retries - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
+}
+
+/**
+ * Verify that a payment of at least `minAmountXLM` was received by `agentAddress`.
+ * Polls Horizon with retry logic for eventual consistency.
+ *
+ * @param agentAddress   — Stellar address of the receiving agent
+ * @param minAmountXLM   — minimum expected XLM amount (tolerance applied by caller)
+ * @param retries        — polling attempts
+ * @param delayMs        — delay between attempts
+ */
+export async function verifyPaymentReceived(
+  agentAddress: string,
+  minAmountXLM: number,
+  retries = 10,
+  delayMs = 5_000,
+): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const resp = await fetch(
+        `${HORIZON_URL}/payments?account=${encodeURIComponent(agentAddress)}&order=desc&limit=20`,
+      );
+      if (resp.ok) {
+        const data = await resp.json() as {
+          _embedded?: {
+            records?: Array<{ type: string; amount?: string; asset_type?: string }>;
+          };
+        };
+        const payments = data._embedded?.records ?? [];
+        const relevant = payments.filter(
+          (p) =>
+            p.type === "payment" &&
+            p.asset_type === "native" &&
+            parseFloat(p.amount ?? "0") >= minAmountXLM,
+        );
+        if (relevant.length > 0) return true;
+      }
+    } catch {
+      // retry on network error
+    }
+    if (i < retries - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
 }

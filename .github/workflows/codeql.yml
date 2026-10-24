@@ -1,0 +1,122 @@
+name: CodeQL Analysis
+
+# Runs on every PR and every push to main to detect security vulnerabilities
+# in JavaScript/TypeScript source code using GitHub Advanced Security / CodeQL.
+#
+# Scope: backend (Node.js/TS), frontend (React/TS), smart-contracts (TS SDK).
+# Rust code in smart-contracts/contracts/ is covered by cargo audit in ci.yml.
+#
+# Results are uploaded to the GitHub Security tab (Code scanning alerts).
+# A failed CodeQL scan does NOT block the ci-gate — it surfaces findings as
+# Security alerts, letting developers review and triage before blocking merges.
+# Once the project has cleared its baseline alert backlog, consider adding this
+# workflow to the branch protection "required checks" list.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  schedule:
+    # Run a full scan weekly (Sunday at 02:00 UTC) to catch newly published
+    # advisories even when there are no code changes.
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Required to upload SARIF results to GitHub Security tab
+  security-events: write
+  # Required for private repositories — allows CodeQL to read Actions logs
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL — JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # CodeQL groups JS and TS under the single "javascript" language token.
+        # A single matrix entry is sufficient for the whole monorepo.
+        language: [javascript]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Initialise the CodeQL toolchain and configure the analysis database.
+      # auto-build: false — we run explicit build commands below so CodeQL can
+      # trace TypeScript type-checking and catch type-flow vulnerabilities.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Use the default security-and-quality query suite, which covers
+          # OWASP Top 10, CWE Top 25, and additional high-confidence queries.
+          # Switch to "security-extended" for broader but noisier coverage.
+          queries: security-and-quality
+          # Point CodeQL at all three JS/TS sub-projects so it analyses the
+          # full monorepo rather than just the repo root.
+          source-root: .
+          config: |
+            paths:
+              - backend/src
+              - frontend/src
+              - smart-contracts/src
+              - smart-contracts/tests
+            paths-ignore:
+              - "**/*.test.ts"
+              - "**/*.spec.ts"
+              - "**/__mocks__/**"
+              - "**/node_modules/**"
+              - "**/dist/**"
+              - "**/build/**"
+
+      # Set up Node.js so that npm install / tsc commands work correctly.
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Install and build each sub-project so CodeQL can trace the full type
+      # graph. Failures here don't abort the whole workflow — CodeQL falls
+      # back to a partial build and still analyses what it can find.
+      - name: Build backend (for CodeQL type tracing)
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build || true
+
+      - name: Build frontend (for CodeQL type tracing)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build || true
+
+      - name: Build smart-contracts TS SDK (for CodeQL type tracing)
+        working-directory: smart-contracts
+        run: |
+          npm ci
+          npm run build || true
+
+      # Run the analysis and upload results to the GitHub Security tab.
+      # SARIF output is automatically associated with the current branch/PR.
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+          # Upload findings as SARIF to the Security tab. Results are visible
+          # under Security → Code scanning alerts on the repository page.
+          upload: true

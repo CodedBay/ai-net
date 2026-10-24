@@ -1,4 +1,5 @@
 import type { AgentRecord } from '../types/api'
+import { fuzzyMatchFields, type WeightedField } from './fuzzy'
 
 export type SortKey = 'price' | 'reputation'
 export type SortDir = 'asc' | 'desc'
@@ -14,6 +15,7 @@ export interface AgentFilters {
   status: StatusFilter
   sortKey: SortKey | null
   sortDir: SortDir
+  searchQuery?: string
 }
 
 export const DEFAULT_FILTERS: AgentFilters = {
@@ -23,6 +25,7 @@ export const DEFAULT_FILTERS: AgentFilters = {
   status: 'all',
   sortKey: null,
   sortDir: 'desc',
+  searchQuery: '',
 }
 
 /**
@@ -91,25 +94,49 @@ export function filterAndSortAgents(
   agents: AgentRecord[],
   filters: AgentFilters
 ): AgentRecord[] {
-  const filtered = agents.filter((agent) => {
+  const query = filters.searchQuery?.trim()
+
+  type ScoredAgent = { agent: AgentRecord; score: number }
+  const scoredAgents: ScoredAgent[] = []
+
+  for (const agent of agents) {
     if (filters.capabilities.length > 0) {
       const matches = filters.capabilities.some((c) => agent.capabilities.includes(c))
-      if (!matches) return false
+      if (!matches) continue
     }
 
-    if (filters.priceMin != null && agent.price < filters.priceMin) return false
-    if (filters.priceMax != null && agent.price > filters.priceMax) return false
+    if (filters.priceMin != null && agent.price < filters.priceMin) continue
+    if (filters.priceMax != null && agent.price > filters.priceMax) continue
 
-    if (filters.status !== 'all' && agent.status !== filters.status) return false
+    if (filters.status !== 'all' && agent.status !== filters.status) continue
 
-    return true
-  })
+    if (query) {
+      const fields: WeightedField[] = [
+        { text: agent.name, weight: 3 },
+        ...agent.capabilities.map((c) => ({ text: c, weight: 2 })),
+        { text: agent.id, weight: 1.5 },
+      ]
+      const match = fuzzyMatchFields(query, fields)
+      if (!match) continue
+      scoredAgents.push({ agent, score: match.score })
+    } else {
+      scoredAgents.push({ agent, score: 0 })
+    }
+  }
 
-  if (!filters.sortKey) return filtered
+  if (filters.sortKey) {
+    const key = filters.sortKey
+    const factor = filters.sortDir === 'asc' ? 1 : -1
+    return scoredAgents
+      .map((s) => s.agent)
+      .sort((a, b) => (a[key] - b[key]) * factor)
+  }
 
-  const key = filters.sortKey
-  const factor = filters.sortDir === 'asc' ? 1 : -1
-  return [...filtered].sort((a, b) => (a[key] - b[key]) * factor)
+  if (query) {
+    return scoredAgents.sort((a, b) => b.score - a.score).map((s) => s.agent)
+  }
+
+  return scoredAgents.map((s) => s.agent)
 }
 
 // --- URL query-string (de)serialization -----------------------------------
@@ -129,6 +156,9 @@ export function filtersToSearchParams(filters: AgentFilters): Record<string, str
     params.sort = filters.sortKey
     params.dir = filters.sortDir
   }
+  if (filters.searchQuery) {
+    params.q = filters.searchQuery
+  }
 
   return params
 }
@@ -144,6 +174,7 @@ export function filtersFromSearchParams(params: URLSearchParams): AgentFilters {
   const status = params.get('status')
   const sort = params.get('sort')
   const dir = params.get('dir')
+  const q = params.get('q')
 
   return {
     capabilities: caps ? caps.split(',').map((c) => c.trim()).filter(Boolean) : [],
@@ -152,5 +183,6 @@ export function filtersFromSearchParams(params: URLSearchParams): AgentFilters {
     status: status === 'active' || status === 'inactive' ? status : 'all',
     sortKey: sort === 'price' || sort === 'reputation' ? sort : null,
     sortDir: dir === 'asc' ? 'asc' : 'desc',
+    searchQuery: q || '',
   }
 }

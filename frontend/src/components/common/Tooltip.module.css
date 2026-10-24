@@ -1,0 +1,90 @@
+.tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tooltipContent {
+  position: absolute;
+  z-index: 500;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  white-space: normal;
+  max-width: 260px;
+  min-width: 120px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  line-height: 1.5;
+  pointer-events: none;
+  animation: tooltipIn 120ms ease-out;
+}
+
+@keyframes tooltipIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Arrow */
+.tooltipContent::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--surface-elevated);
+}
+
+/* Flip to bottom when near top of viewport */
+.tooltipBottom {
+  bottom: auto;
+  top: calc(100% + 8px);
+  animation: tooltipInBottom 120ms ease-out;
+}
+
+.tooltipBottom::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: var(--surface-elevated);
+}
+
+@keyframes tooltipInBottom {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Mobile info panel */
+.infoPanel {
+  display: none;
+}
+
+@media (hover: none), (max-width: 768px) {
+  .tooltipContent {
+    display: none;
+  }
+
+  .infoPanel {
+    display: block;
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-glass);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    animation: infoPanelIn 150ms ease-out;
+  }
+
+  @keyframes infoPanelIn {
+    from { opacity: 0; max-height: 0; }
+    to   { opacity: 1; max-height: 100px; }
+  }
+}

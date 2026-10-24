@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { WalletPage } from './pages/WalletPage';
 
 const VALID_SECRET = 'SCEU5HVW73GXX2Y5XWXTXOBRBAHG2KNKKL2WXW2F6OFMRPGZ5EQHUDUE';
 const VALID_PUBKEY = 'GDEUVS2EDX2ENN2RYHFIWJXT6XHXMOXI7EUKMU2YDF637JLJAOX4UT3J';
@@ -29,6 +30,20 @@ test.describe('Wallet Connection', () => {
       localStorage.removeItem('wallet_connection_method');
     });
     await page.reload();
+  });
+
+  test('connects a deterministic Freighter wallet stub', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.clear();
+      localStorage.setItem('wallet_wizard_completed', 'true');
+    });
+
+    const wallet = new WalletPage(page);
+    await wallet.open();
+    await wallet.connectWithFreighter();
+
+    await expect(wallet.publicKey()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('wallet_connection_method'))).toBe('freighter');
   });
 
   test('fails correctly on invalid secret key input', async ({ page }) => {

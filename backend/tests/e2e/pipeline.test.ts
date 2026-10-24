@@ -39,6 +39,7 @@ import type { AgentResult } from '../../src/agents/research/types';
 // yields the full 5-node DAG this suite is built around.
 const PROMPT =
   'Generate a market-entry report for solar energy in Southeast Asia, including software implementation and UI design';
+const TEST_WALLET = 'GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ';
 
 const REQUIRED_SECTIONS = [
   'Executive Summary',
@@ -132,7 +133,7 @@ async function pollUntilStatus(
   while (Date.now() < deadline) {
     const res = await request(httpServer)
       .get(`/api/tasks/${taskId}`)
-      .set("walletpublickey", "GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ");
+      .set("walletpublickey", "TEST_WALLET");
     if (res.status === 200 && res.body.status === targetStatus) {
       return res.body as Record<string, unknown>;
     }
@@ -152,7 +153,7 @@ function collectWsEvents(taskId: string, timeoutMs = 30_000): Promise<Array<Reco
     }, timeoutMs);
 
     // Auth handshake: the owning wallet must be sent as the first message.
-    ws.on('open', () => ws.send(JSON.stringify({ walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' })));
+    ws.on('open', () => ws.send(JSON.stringify({ walletPublicKey: 'TEST_WALLET' })));
 
     ws.on('message', raw => {
       const event = JSON.parse(raw.toString()) as Record<string, unknown>;
@@ -182,8 +183,8 @@ describe('Full pipeline E2E', () => {
   it('POST /api/tasks returns 201 with taskId and 5-node dagPreview', async () => {
     const res = await request(httpServer)
       .post('/api/tasks')
-      .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' });
+      .set('walletpublickey', 'TEST_WALLET')
+      .send({ prompt: PROMPT, walletPublicKey: 'TEST_WALLET' });
 
     expect(res.status).toBe(201);
     expect(res.body.taskId).toMatch(/^task_/);
@@ -268,7 +269,7 @@ describe('Full pipeline E2E', () => {
   it('GET /api/tasks/:id returns 404 for unknown taskId', async () => {
     const res = await request(httpServer)
       .get('/api/tasks/task_doesnotexist')
-      .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ');
+      .set('walletpublickey', 'TEST_WALLET');
     expect(res.status).toBe(404);
   });
 
@@ -361,7 +362,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
     // POST task
     const postRes = await request(appServer)
       .post('/api/tasks')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' });
+      .send({ prompt: PROMPT, walletPublicKey: 'TEST_WALLET' });
 
     expect(postRes.status).toBe(201);
     const { taskId } = postRes.body as { taskId: string };
@@ -374,7 +375,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
     while (Date.now() < deadline) {
       const getRes = await request(appServer)
         .get(`/api/tasks/${taskId}`)
-        .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ');
+        .set('walletpublickey', 'TEST_WALLET');
       if (getRes.status === 200 && getRes.body.status === 'completed') {
         finalTask = getRes.body as Record<string, unknown>;
         break;
@@ -414,7 +415,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
 
     const postRes = await request(bareServer)
       .post('/api/tasks')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' });
+      .send({ prompt: PROMPT, walletPublicKey: 'TEST_WALLET' });
 
     expect(postRes.status).toBe(201);
     const { taskId } = postRes.body as { taskId: string };
@@ -426,7 +427,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
       await new Promise(r => setTimeout(r, 100));
       const getRes = await request(bareServer)
         .get(`/api/tasks/${taskId}`)
-        .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ');
+        .set('walletpublickey', 'TEST_WALLET');
       status = (getRes.body as { status: string }).status;
     }
 
@@ -453,7 +454,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
     try {
       const postRes = await request(srv)
         .post('/api/tasks')
-        .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' });
+        .send({ prompt: PROMPT, walletPublicKey: 'TEST_WALLET' });
 
       expect(postRes.status).toBe(201);
       const { taskId } = postRes.body as { taskId: string };
@@ -468,7 +469,7 @@ describe('HTTP dispatch integration (mock agent server)', () => {
         await new Promise(r => setTimeout(r, 100));
         const getRes = await request(srv)
           .get(`/api/tasks/${taskId}`)
-          .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ');
+          .set('walletpublickey', 'TEST_WALLET');
         body = getRes.body as TaskBody;
         if (body && body.status === 'failed') break;
       }
@@ -533,7 +534,7 @@ describe('HTTP dispatch — agent error handling', () => {
   it('handles agent HTTP 500 response gracefully without crashing', async () => {
     const postRes = await request(appServer)
       .post('/api/tasks')
-      .send({ prompt: PROMPT, walletPublicKey: 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ' });
+      .send({ prompt: PROMPT, walletPublicKey: 'TEST_WALLET' });
 
     expect(postRes.status).toBe(201);
     const { taskId } = postRes.body as { taskId: string };
@@ -544,7 +545,7 @@ describe('HTTP dispatch — agent error handling', () => {
       await new Promise(r => setTimeout(r, 200));
       const getRes = await request(appServer)
         .get(`/api/tasks/${taskId}`)
-        .set('walletpublickey', 'GFAKEWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHKZ');
+        .set('walletpublickey', 'TEST_WALLET');
       status = (getRes.body as { status: string }).status;
       if (status === 'failed' || status === 'completed') break;
     }

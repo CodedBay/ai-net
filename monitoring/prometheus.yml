@@ -1,0 +1,33 @@
+# Prometheus configuration for ai-net monitoring
+# Used when running with: docker compose --profile monitoring up
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+    project: ai-net
+
+# Alert manager configuration (optional — set ALERTMANAGER_URL env var)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# Load alert rules
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
+scrape_configs:
+  # Scrape the ai-net backend /metrics endpoint
+  - job_name: 'ai-net-backend'
+    static_configs:
+      - targets: ['backend:3000']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

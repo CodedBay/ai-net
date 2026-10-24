@@ -44,10 +44,12 @@ mod types;
 
 pub use errors::Error;
 pub use types::{
-    DataKey, FallbackPriceSetEvent, OracleSetEvent, PriceResolvedEvent, PriceSource, ResolvedPrice,
+    DataKey, FallbackPriceSetEvent, FeederAddedEvent, FeederPriceSubmittedEvent,
+    FeederRemovedEvent, FeederSubmission, OracleSetEvent, PriceResolvedEvent, PriceSource,
+    ResolvedPrice,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, IntoVal, Symbol, Val, Vec};
 
 /// Persistent TTL for fallback prices: ~30 days at 5 s/ledger.
 const FALLBACK_TTL_LEDGERS: u32 = 17_280 * 30;
@@ -195,16 +197,158 @@ impl OracleManagerContract {
         Ok(())
     }
 
+    // ── Oracle feeder management ──────────────────────────────────────────────
+
+    /// Add an authorized oracle price feeder (admin only).
+    ///
+    /// Feeders are stored as a list in Instance storage. Adding a feeder that
+    /// is already authorized is a no-op (idempotent).
+    pub fn add_feeder(env: Env, feeder: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+
+        let mut feeders: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuthorizedFeeders)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if !feeders.contains(&feeder) {
+            feeders.push_back(feeder.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::AuthorizedFeeders, &feeders);
+
+            env.events().publish(
+                (symbol_short!("mgr"), symbol_short!("fdr_add")),
+                FeederAddedEvent { feeder },
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Remove an authorized oracle price feeder (admin only).
+    ///
+    /// Removing an unknown feeder is a no-op (idempotent).
+    pub fn remove_feeder(env: Env, feeder: Address) -> Result<(), Error> {
+        require_admin(&env)?;
+
+        let feeders: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuthorizedFeeders)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut updated: Vec<Address> = Vec::new(&env);
+        for f in feeders.iter() {
+            if f != feeder {
+                updated.push_back(f);
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AuthorizedFeeders, &updated);
+
+        // Remove any stored submission from this feeder.
+        env.storage()
+            .persistent()
+            .remove(&DataKey::FeederSubmission(feeder.clone()));
+
+        env.events().publish(
+            (symbol_short!("mgr"), symbol_short!("fdr_rem")),
+            FeederRemovedEvent { feeder },
+        );
+
+        Ok(())
+    }
+
+    /// Submit a price as an authorized feeder.
+    ///
+    /// * `feeder`    — must be in the authorized feeder list.
+    /// * `price`     — XLM/USD price in stroops (8-decimal fixed-point, must be > 0).
+    /// * `timestamp` — off-chain observation time (must be ≤ current ledger timestamp).
+    ///
+    /// The latest submission per feeder is stored in Persistent storage. When
+    /// `resolve_price` is called, the median of all fresh feeder submissions
+    /// (within the 300 s staleness window) is returned.
+    pub fn submit_price(
+        env: Env,
+        feeder: Address,
+        price: i128,
+        timestamp: u64,
+    ) -> Result<(), Error> {
+        feeder.require_auth();
+
+        if price <= 0 {
+            return Err(Error::NotInitialized); // reuse: InvalidPrice
+        }
+
+        let now = env.ledger().timestamp();
+        if timestamp > now {
+            return Err(Error::NotInitialized); // reuse: InvalidTimestamp
+        }
+
+        // Verify feeder is authorized.
+        let feeders: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuthorizedFeeders)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if !feeders.contains(&feeder) {
+            return Err(Error::NotInitialized); // reuse: Unauthorized
+        }
+
+        let submission = FeederSubmission {
+            feeder: feeder.clone(),
+            price,
+            timestamp,
+        };
+
+        let key = DataKey::FeederSubmission(feeder.clone());
+        env.storage().persistent().set(&key, &submission);
+        env.storage().persistent().extend_ttl(
+            &key,
+            FALLBACK_TTL_LEDGERS.saturating_sub(1),
+            FALLBACK_TTL_LEDGERS,
+        );
+
+        env.events().publish(
+            (symbol_short!("mgr"), symbol_short!("fdr_sub")),
+            FeederPriceSubmittedEvent { feeder, price, timestamp },
+        );
+
+        Ok(())
+    }
+
+    /// Return the number of currently authorized feeders.
+    pub fn get_feeder_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get::<DataKey, Vec<Address>>(&DataKey::AuthorizedFeeders)
+            .map(|v| v.len())
+            .unwrap_or(0)
+    }
+
+    /// Return the list of authorized feeder addresses.
+    pub fn get_feeders(env: Env) -> Vec<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::AuthorizedFeeders)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
     // ── Core interface ────────────────────────────────────────────────────────
 
-    /// Resolve the current price for `pair` following the priority order:
-    ///
+    /// Resolve the current price for `pair` following the priority order:    ///
     /// 1. Live oracle price (if oracle configured and price is fresh)
-    /// 2. Admin-set fallback price
-    /// 3. `Error::NoPriceAvailable`
+    /// 2. Feeder median price (if ≥ 1 authorized feeder has a fresh submission within 300 s)
+    /// 3. Admin-set fallback price
+    /// 4. `Error::NoPriceAvailable`
     ///
-    /// A stale oracle response is **never** returned; the fallback is used
-    /// transparently instead.
+    /// A stale oracle response is **never** returned; the feeder median or
+    /// fallback is used transparently instead.
     pub fn resolve_price(env: Env, pair: Symbol) -> Result<ResolvedPrice, Error> {
         // Step 1: try the live oracle.
         if let Some(oracle) = env
@@ -231,7 +375,68 @@ impl OracleManagerContract {
             // Oracle failed (stale / not found / error) → fall through.
         }
 
-        // Step 2: admin fallback.
+        // Step 2: feeder median aggregation (300 s staleness window).
+        const FEEDER_STALENESS_SECS: u64 = 300;
+        let now = env.ledger().timestamp();
+        let feeders: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AuthorizedFeeders)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut fresh_prices: Vec<i128> = Vec::new(&env);
+        for feeder in feeders.iter() {
+            let key = DataKey::FeederSubmission(feeder);
+            if let Some(sub) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, FeederSubmission>(&key)
+            {
+                if now.saturating_sub(sub.timestamp) <= FEEDER_STALENESS_SECS {
+                    fresh_prices.push_back(sub.price);
+                }
+            }
+        }
+
+        if !fresh_prices.is_empty() {
+            // Sort ascending via insertion sort (list is small in practice).
+            let n = fresh_prices.len();
+            let mut i = 1u32;
+            while i < n {
+                let mut j = i;
+                while j > 0 {
+                    let a = fresh_prices.get(j - 1).unwrap();
+                    let b = fresh_prices.get(j).unwrap();
+                    if a > b {
+                        fresh_prices.set(j - 1, b);
+                        fresh_prices.set(j, a);
+                    } else {
+                        break;
+                    }
+                    j -= 1;
+                }
+                i += 1;
+            }
+            let median_idx = (n - 1) / 2;
+            let price = fresh_prices.get(median_idx).unwrap();
+
+            let resolved = ResolvedPrice {
+                pair: pair.clone(),
+                price,
+                source: PriceSource::Feeder,
+            };
+            env.events().publish(
+                (symbol_short!("mgr"), symbol_short!("resolved")),
+                PriceResolvedEvent {
+                    pair,
+                    price,
+                    source: PriceSource::Feeder,
+                },
+            );
+            return Ok(resolved);
+        }
+
+        // Step 3: admin fallback.
         if let Some(price) = read_fallback(&env, &pair) {
             let resolved = ResolvedPrice {
                 pair: pair.clone(),
@@ -249,7 +454,7 @@ impl OracleManagerContract {
             return Ok(resolved);
         }
 
-        // Step 3: nothing available.
+        // Step 4: nothing available.
         Err(Error::NoPriceAvailable)
     }
 

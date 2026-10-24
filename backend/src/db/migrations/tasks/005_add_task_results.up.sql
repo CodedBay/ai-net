@@ -1,0 +1,3 @@
+ALTER TABLE tasks ADD COLUMN result TEXT;
+ALTER TABLE tasks ADD COLUMN resultFile TEXT;
+ALTER TABLE tasks ADD COLUMN resultExpiresAt TEXT;

@@ -51,4 +51,23 @@ describe('DataTable', () => {
     expect(secondRow).toHaveFocus();
     expect(onRowClick).toHaveBeenCalledWith(rows[1]);
   });
+
+  it('exposes mobile priorities and card presentation for responsive layouts', () => {
+    render(
+      <DataTable
+        columns={[
+          { key: 'name', header: 'Name', priority: 'primary' },
+          { key: 'score', header: 'Score', priority: 'hidden-mobile' },
+        ]}
+        rows={rows}
+        getRowKey={(row) => row.id}
+        mobileView="cards"
+      />
+    );
+
+    const table = screen.getByRole('table');
+    expect(table).toHaveAttribute('data-mobile-view', 'cards');
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('data-priority', 'primary');
+    expect(screen.getByRole('cell', { name: '2' })).toHaveAttribute('data-priority', 'hidden-mobile');
+  });
 });

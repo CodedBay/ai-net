@@ -64,3 +64,5 @@ export function decompose(taskId: string, prompt: string): DAGNode[] {
 
   return nodes;
 }
+
+export { TaskRegistry, taskRegistry } from "./taskRegistry";

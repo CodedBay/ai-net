@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
     alias: {
@@ -14,6 +14,11 @@ export default defineConfig({
       '@types': path.resolve(__dirname, './src/types'),
       '@context': path.resolve(__dirname, './src/context'),
       '@utils': path.resolve(__dirname, './src/utils'),
+      ...(mode === 'e2e'
+        ? {
+            '@stellar/freighter-api': path.resolve(__dirname, './tests/e2e/stubs/freighter.ts'),
+          }
+        : {}),
     },
   },
   server: {
@@ -46,4 +51,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

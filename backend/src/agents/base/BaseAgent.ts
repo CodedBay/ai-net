@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { VeniceClient, type AgentType, type VeniceClientLike } from '../../services/venice/index.js';
 import { HeartbeatClient } from '../heartbeat.js';
 import { getConfig } from '../../config/index.js';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger({ component: 'agent-registration' });
 
 export interface BaseAgentConfig {
   veniceClient?: VeniceClientLike;
@@ -77,14 +80,21 @@ export abstract class BaseAgent {
         body,
       });
       if (!response.ok) {
-        console.warn(
-          `[${this.constructor.name}] Registration returned non-2xx status: ${response.status}`
+        logger.warn(
+          { agent: this.constructor.name, capability: this.getCapability(), status: response.status },
+          'agent registration returned non-2xx status',
         );
       } else {
-        console.info(`[${this.constructor.name}] Successfully registered with capability "${this.getCapability()}".`);
+        logger.info(
+          { agent: this.constructor.name, capability: this.getCapability() },
+          'agent registered successfully',
+        );
       }
     } catch (err) {
-      console.warn(`[${this.constructor.name}] Could not reach registry to self-register:`, err instanceof Error ? err.message : 'unknown');
+      logger.warn(
+        { agent: this.constructor.name, capability: this.getCapability(), err },
+        'agent could not reach registry to self-register',
+      );
     }
   }
 

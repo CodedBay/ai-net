@@ -1,72 +1,46 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { getAuthService, AuthService } from "../../services/auth";
-import { sessionAuthMiddleware, optionalAuthMiddleware } from "../middleware/auth";
+import { authMiddleware as sessionAuthMiddleware, optionalAuthMiddleware } from "../middleware/auth";
 import { ValidationError } from "../../errors/ValidationError";
+import { emptyBodySchema, stellarPublicKeySchema } from "../../schemas/common";
+import { validate } from "../middleware/validate";
 
-const createTokenSchema = z.object({
-  walletPublicKey: z.string().min(1, "walletPublicKey is required"),
-  deviceId: z.string().min(1, "deviceId is required"),
-  deviceName: z.string().optional(),
-});
+const walletVerifySchema = z.object({
+  publicKey: stellarPublicKeySchema,
+  nonce: z.string().min(1).max(128),
+  signature: z.string().min(1).max(256),
+  deviceId: z.string().trim().min(1).max(128).default("wallet"),
+}).strict();
 
 const refreshTokenSchema = z.object({
-  refreshToken: z.string().min(1, "refreshToken is required"),
-});
+  refreshToken: z.string().min(1, "refreshToken is required").max(4096),
+}).strict();
 
 const revokeSessionSchema = z.object({
-  sessionId: z.string().optional(),
-  reason: z.string().optional(),
-});
+  sessionId: z.string().min(1).max(128).optional(),
+  reason: z.string().max(500).optional(),
+}).strict();
 
 export function createAuthRouter(authService?: AuthService): Router {
   const router = Router();
   const service = authService ?? getAuthService();
 
-  /**
-   * @openapi
-   * /api/auth/token:
-   *   post:
-   *     summary: Issue access and refresh token pair
-   *     description: Establishes a new authenticated session family for a wallet & device.
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [walletPublicKey, deviceId]
-   *             properties:
-   *               walletPublicKey:
-   *                 type: string
-   *               deviceId:
-   *                 type: string
-   *               deviceName:
-   *                 type: string
-   *     responses:
-   *       200:
-   *         description: Tokens issued successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/AuthTokensResponse'
-   */
-  router.post("/token", (req: Request, res: Response, next: NextFunction) => {
-    const parseResult = createTokenSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      return next(new ValidationError("Invalid request body", { issues: parseResult.error.issues }));
-    }
+  router.get("/nonce", (_req: Request, res: Response) => {
+    res.status(200).json(service.createWalletNonce());
+  });
 
+  const verifyWallet = (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { walletPublicKey, deviceId, deviceName } = parseResult.data;
+      const { publicKey, nonce, signature, deviceId } = req.body as z.infer<typeof walletVerifySchema>;
       const ipAddress = req.ip || req.socket.remoteAddress || "unknown";
       const userAgent = req.headers["user-agent"] || "unknown";
 
-      const tokens = service.createSession({
-        walletPublicKey,
+      const tokens = service.verifyWalletSignature({
+        walletPublicKey: publicKey,
+        nonce,
+        signature,
         deviceId,
-        deviceName,
         ipAddress,
         userAgent,
       });
@@ -75,7 +49,9 @@ export function createAuthRouter(authService?: AuthService): Router {
     } catch (err) {
       next(err);
     }
-  });
+  };
+  router.post("/verify", validate(walletVerifySchema), verifyWallet);
+  router.post("/token", validate(walletVerifySchema), verifyWallet);
 
   /**
    * @openapi
@@ -103,15 +79,14 @@ export function createAuthRouter(authService?: AuthService): Router {
    *               $ref: '#/components/schemas/TokenRefreshResponse'
    *       401:
    *         description: Invalid, expired, or reused refresh token
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
    */
-  router.post("/refresh", (req: Request, res: Response, next: NextFunction) => {
-    const parseResult = refreshTokenSchema.safeParse(req.body);
-    if (!parseResult.success) {
-      return next(new ValidationError("Invalid request body", { issues: parseResult.error.issues }));
-    }
-
+  router.post("/refresh", validate(refreshTokenSchema), (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { refreshToken } = parseResult.data;
+      const { refreshToken } = req.body as z.infer<typeof refreshTokenSchema>;
       const ipAddress = req.ip || req.socket.remoteAddress || "unknown";
       const userAgent = req.headers["user-agent"] || "unknown";
 
@@ -150,14 +125,10 @@ export function createAuthRouter(authService?: AuthService): Router {
    *       200:
    *         description: Session revoked
    */
-  router.post("/revoke", optionalAuthMiddleware, (req: Request, res: Response, next: NextFunction) => {
-    const parseResult = revokeSessionSchema.safeParse(req.body || {});
-    if (!parseResult.success) {
-      return next(new ValidationError("Invalid request body", { issues: parseResult.error.issues }));
-    }
-
+  router.post("/revoke", validate(revokeSessionSchema), optionalAuthMiddleware, (req: Request, res: Response, next: NextFunction) => {
     try {
-      const targetSessionId = parseResult.data.sessionId || req.user?.sessionId;
+      const body = req.body as z.infer<typeof revokeSessionSchema>;
+      const targetSessionId = body.sessionId || req.user?.sessionId;
       if (!targetSessionId) {
         return next(new ValidationError("sessionId is required or must authenticate via Bearer token"));
       }
@@ -167,7 +138,7 @@ export function createAuthRouter(authService?: AuthService): Router {
 
       service.revokeSession(
         targetSessionId,
-        parseResult.data.reason || "User requested revocation",
+        body.reason || "User requested revocation",
         ipAddress,
         userAgent
       );
@@ -191,7 +162,7 @@ export function createAuthRouter(authService?: AuthService): Router {
    *       200:
    *         description: All sessions revoked
    */
-  router.post("/revoke-all", sessionAuthMiddleware, (req: Request, res: Response, next: NextFunction) => {
+  router.post("/revoke-all", validate(emptyBodySchema), sessionAuthMiddleware, (req: Request, res: Response, next: NextFunction) => {
     try {
       const walletPublicKey = req.user!.sub;
       const ipAddress = req.ip || req.socket.remoteAddress || "unknown";

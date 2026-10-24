@@ -54,9 +54,17 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
         }),
       })),
     })
+
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(() => {
+      const style = document.createElement('div').style
+      const isLight = document.documentElement.classList.contains('theme-light')
+      style.setProperty('--surface-canvas', isLight ? '#FFFFFF' : '#0A0E14')
+      return style
+    })
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     const meta = document.querySelector('meta[name="theme-color"]')
     if (meta && meta.parentNode) {
       meta.parentNode.removeChild(meta)

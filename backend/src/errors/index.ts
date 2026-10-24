@@ -6,3 +6,5 @@ export { UnauthorizedError } from "./UnauthorizedError";
 export { AuthenticationError } from "./AuthenticationError";
 export { RateLimitError } from "./RateLimitError";
 export { PaymentError } from "./PaymentError";
+export { ForbiddenError } from "./ForbiddenError";
+export { ConflictError } from "./ConflictError";

@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { NotificationProvider } from './context/NotificationContext'
 import { i18nReady } from './i18n'
 import './styles/global.css'
 
@@ -29,7 +30,9 @@ async function prepareApp() {
 prepareApp().then(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <App />
+      <NotificationProvider>
+        <App />
+      </NotificationProvider>
     </React.StrictMode>,
   )
 })

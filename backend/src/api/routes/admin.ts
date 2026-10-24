@@ -22,13 +22,15 @@ import {
 import type { ReconciliationRouterOptions } from "./reconciliation";
 import type { ReconciliationTrigger } from "../../services/reconciliation.types";
 import { createLogger } from "../../utils/logger";
+import { emptyBodySchema } from "../../schemas/common";
+import { validate } from "../middleware/validate";
 
 const logger = createLogger({ module: "admin" });
 
 const readOnlySchema = z.object({
   enabled: z.boolean(),
   reason: z.string().max(500).optional(),
-});
+}).strict();
 
 const agentListSchema = z.object({
   status: z.enum(["online", "offline"]).optional(),
@@ -42,11 +44,11 @@ const auditLogQuerySchema = z.object({
 
 const reconciliationSchema = z.object({
   triggeredBy: z.enum(["manual", "scheduled", "release"]).default("manual"),
-});
+}).strict();
 
 const backupSchema = z.object({
-  directory: z.string().min(1).optional(),
-});
+  directory: z.string().min(1).max(2048).optional(),
+}).strict();
 
 export interface AdminRouterOptions {
   queue?: JobQueue;
@@ -91,23 +93,19 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
   const jobQueue = options.queue ?? getGlobalJobQueue();
   const reconciliationService = getReconciliationService(options.reconciliation);
 
+  router.use(adminAuthMiddleware);
   router.use(auditAdminRequests);
 
   router.get("/read-only", (_req: Request, res: Response) => {
     res.json(getReadOnlyState());
   });
 
-  router.put("/read-only", (req: Request, res: Response) => {
-    const parsed = readOnlySchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
-      return;
-    }
-
+  router.put("/read-only", validate(readOnlySchema), (req: Request, res: Response) => {
+    const parsed = req.body as z.infer<typeof readOnlySchema>;
     const state = setReadOnlyState(
-      parsed.data.enabled,
+      parsed.enabled,
       actorFromRequest(req),
-      parsed.data.reason,
+      parsed.reason,
     );
     res.json(state);
   });
@@ -121,7 +119,7 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     res.json({ agents: listAgentsForAdmin(parsed.data.status) });
   });
 
-  router.post("/agents/:id/enable", (req: Request, res: Response) => {
+  router.post("/agents/:id/enable", validate(emptyBodySchema), (req: Request, res: Response) => {
     const agent = setAgentEnabled(req.params.id, true);
     if (!agent) {
       res.status(404).json({ error: "AGENT_NOT_FOUND" });
@@ -130,7 +128,7 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     res.json({ enabled: true, agent });
   });
 
-  router.post("/agents/:id/disable", (req: Request, res: Response) => {
+  router.post("/agents/:id/disable", validate(emptyBodySchema), (req: Request, res: Response) => {
     const agent = setAgentEnabled(req.params.id, false);
     if (!agent) {
       res.status(404).json({ error: "AGENT_NOT_FOUND" });
@@ -141,33 +139,23 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
 
   router.post(
     "/reconciliation/run",
+    validate(reconciliationSchema),
     asyncHandler(async (req: Request, res: Response) => {
-      const parsed = reconciliationSchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
-        return;
-      }
-
-      const triggeredBy = parsed.data.triggeredBy as ReconciliationTrigger;
+      const triggeredBy = (req.body as z.infer<typeof reconciliationSchema>).triggeredBy as ReconciliationTrigger;
       const report = await reconciliationService.run(triggeredBy);
       res.status(200).json(report);
     }),
   );
 
-  router.post("/maintenance/vacuum", (_req: Request, res: Response) => {
+  router.post("/maintenance/vacuum", validate(emptyBodySchema), (_req: Request, res: Response) => {
     res.json({ results: vacuumDatabases() });
   });
 
   router.post(
     "/maintenance/backup",
+    validate(backupSchema),
     asyncHandler(async (req: Request, res: Response) => {
-      const parsed = backupSchema.safeParse(req.body ?? {});
-      if (!parsed.success) {
-        res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
-        return;
-      }
-
-      const results = await backupDatabases(parsed.data.directory);
+      const results = await backupDatabases((req.body as z.infer<typeof backupSchema>).directory);
       res.json({ results });
     }),
   );
@@ -219,7 +207,7 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
    *       `Authorization: Bearer`.
    *     tags: [Admin]
    *     security:
-   *       - adminApiKey: []
+  *       - AdminApiKey: []
    *     parameters:
    *       - in: path
    *         name: id
@@ -246,7 +234,7 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
    *       503:
    *         description: ADMIN_API_KEY is not configured
    */
-  router.get("/traces/:id", adminAuthMiddleware, (req: Request, res: Response) => {
+  router.get("/traces/:id", (req: Request, res: Response) => {
     const id = req.params.id;
 
     // Resolve requestId → correlationId when the id is not already a trace.
@@ -449,7 +437,7 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
    *             schema:
    *               $ref: '#/components/schemas/NotFoundError'
    */
-  router.post("/retry/:id", (req: Request, res: Response) => {
+  router.post("/retry/:id", validate(emptyBodySchema), (req: Request, res: Response) => {
     const jobId = req.params.id;
     const success = jobQueue.retryDeadLetter(jobId);
 

@@ -34,7 +34,7 @@ import type { AgentResult } from '../../src/agents/research/types';
 // yields the full 5-node DAG this suite is built around.
 const PROMPT =
   'Generate a market-entry report for solar energy in Southeast Asia, including software implementation and UI design';
-const OWNER = 'GOWNERWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK';
+const OWNER = 'GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ';
 const NODE_IDS = ['node_research', 'node_risk', 'node_coding', 'node_design', 'node_report'];
 
 const mockReleasePayment: PaymentReleaseFn = async (_taskId, nodeId) => `fakehash_${nodeId}`;

@@ -32,5 +32,6 @@
     }
   },
   "include": ["src", "vitest.setup.ts"],
+  "exclude": ["src/**/*.stories.tsx"],
   "references": []
 }

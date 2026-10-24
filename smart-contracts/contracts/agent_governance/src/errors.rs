@@ -46,4 +46,25 @@ pub enum Error {
     ProposalFinalized = 15,
     /// Proposal title or description must not be empty.
     EmptyMetadata = 16,
+
+    // ── Timelock errors (17–25) ──────────────────────────────────────────────
+
+    /// The timelock delay has not yet elapsed; execution is not allowed.
+    TimelockActive = 17,
+    /// The referenced pending change does not exist.
+    ChangeNotFound = 18,
+    /// The change has already been executed.
+    ChangeAlreadyExecuted = 19,
+    /// The change has already been cancelled.
+    ChangeAlreadyCancelled = 20,
+    /// The requested delay is shorter than the minimum configured delay.
+    InvalidDelay = 21,
+    /// No guardian set has been configured on this contract.
+    GuardianSetNotConfigured = 22,
+    /// Not enough guardian approvals to emergency-execute the change.
+    InsufficientGuardianApprovals = 23,
+    /// The caller is not a member of the guardian set.
+    NotGuardian = 24,
+    /// This guardian has already approved the change.
+    AlreadyApprovedByGuardian = 25,
 }

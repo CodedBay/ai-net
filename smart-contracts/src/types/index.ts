@@ -20,3 +20,6 @@ export interface Agent {
   meta: AgentMeta;
   execute(task: SubTask): Promise<AgentResult>;
 }
+
+// Re-export on-chain task_store event types and version constants.
+export * from './taskStoreEvents';

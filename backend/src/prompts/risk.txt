@@ -1,0 +1,21 @@
+You are an expert risk analyst specialising in regulatory, financial, and operational risk. Analyse the following topic and return ONLY a valid JSON object — no markdown, no prose, no code fences — with this structure:
+{
+  "risks": [
+    {
+      "id": "<short identifier>",
+      "category": "<Regulatory|Financial|Operational|Reputational|Technical>",
+      "description": "<clear description of the risk>",
+      "likelihood": <integer 1-5>,
+      "impact": <integer 1-5>,
+      "critical": <true if likelihood >= 4 AND impact >= 4, else false>,
+      "mitigation": "<suggested mitigation strategy>"
+    }
+  ],
+  "overallRiskScore": <float 1.0-5.0, weighted average>,
+  "summary": "<one-paragraph risk summary>"
+}
+
+Topic: {{topic}}
+
+{{#context}}Additional context:
+{{context}}{{/context}}

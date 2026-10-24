@@ -22,6 +22,7 @@ import os from 'os';
 import { createLogger } from '../utils/logger';
 import { metricsService } from './metrics';
 import type { RequestSample } from './metrics.types';
+import { getCacheMetrics } from '../cache/metrics';
 
 const logger = createLogger({ component: 'prometheus' });
 
@@ -136,6 +137,7 @@ function collectQueueMetrics(): string {
     let processing = 0;
     let completed = 0;
     let failed = 0;
+    let deadLetter = 0;
 
     for (const row of rows) {
       const count = Number(row.count) || 0;
@@ -144,6 +146,7 @@ function collectQueueMetrics(): string {
         case 'processing': processing = count; break;
         case 'completed': completed = count; break;
         case 'failed': failed = count; break;
+        case 'dead-letter': deadLetter = count; break;
       }
     }
 
@@ -151,9 +154,46 @@ function collectQueueMetrics(): string {
     out += formatGauge('ainet_queue_processing', 'Currently processing jobs', processing);
     out += formatCounter('ainet_queue_completed_total', 'Total completed jobs', completed);
     out += formatCounter('ainet_queue_failed_total', 'Total failed jobs', failed);
+    out += formatGauge('ainet_queue_dead_letter_depth', 'Jobs currently in the dead-letter queue', deadLetter);
   } catch (err) {
     logger.debug({ err }, 'queue metrics unavailable');
   }
+  return out;
+}
+
+function collectDatabasePoolMetrics(): string {
+  let active = 0;
+  let total = 0;
+  let pending = 0;
+
+  try {
+    const { currentTaskPool } = require('../db/tasks') as typeof import('../db/tasks');
+    const { currentAgentPool } = require('../db/agents') as typeof import('../db/agents');
+    const { currentPaymentPool } = require('../db/index') as typeof import('../db/index');
+
+    for (const pool of [currentTaskPool(), currentAgentPool(), currentPaymentPool()]) {
+      if (!pool) continue;
+      const snapshot = pool.metrics();
+      active += snapshot.activeConnections;
+      total += snapshot.totalConnections;
+      pending += snapshot.pendingAcquires;
+    }
+  } catch (err) {
+    logger.debug({ err }, 'database pool metrics unavailable');
+  }
+
+  let out = '';
+  out += formatGauge('ainet_db_pool_active_connections', 'Active SQLite reader connections', active);
+  out += formatGauge('ainet_db_pool_total_connections', 'Open SQLite reader connections', total);
+  out += formatGauge('ainet_db_pool_pending_acquires', 'Callers waiting for a SQLite reader connection', pending);
+  return out;
+}
+
+function collectCacheMetrics(): string {
+  const metrics = getCacheMetrics();
+  let out = '';
+  out += formatCounter('ainet_cache_hits_total', 'Total cache hits', metrics.hits);
+  out += formatCounter('ainet_cache_misses_total', 'Total cache misses', metrics.misses);
   return out;
 }
 
@@ -194,6 +234,18 @@ function collectAgentMetrics(): string {
 
     const total = rows.reduce((sum, r) => sum + (Number(r.count) || 0), 0);
     out += formatGauge('ainet_agents_count', 'Total agent count', total);
+
+    // agents_cleaned_total counter (Issue #402)
+    try {
+      const { getAgentsCleanedTotal } = require('./agentCleanup') as typeof import('./agentCleanup');
+      out += formatCounter(
+        'ainet_agents_cleaned_total',
+        'Total agents fully cleaned up after deregistration',
+        getAgentsCleanedTotal(),
+      );
+    } catch {
+      // module may not be loaded yet; non-fatal
+    }
   } catch (err) {
     logger.debug({ err }, 'agent metrics unavailable');
   }
@@ -322,6 +374,10 @@ export function generatePrometheusMetrics(): string {
   body += collectPaymentMetrics();
   body += '\n';
   body += collectQueueMetrics();
+  body += '\n';
+  body += collectDatabasePoolMetrics();
+  body += '\n';
+  body += collectCacheMetrics();
   body += '\n';
   body += collectLlmMetrics(samples);
   body += '\n';

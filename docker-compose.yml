@@ -1,63 +1,192 @@
-version: '3.8'
+version: '3.9'
 
 services:
   stellar-standalone:
     image: stellar/quickstart:testing
     container_name: ai-net-stellar-standalone
+    command: --standalone --enable-soroban-rpc
+    environment:
+      STELLAR_NETWORK: standalone
+      ENABLE_SOROBAN_RPC: 'true'
+      NETWORK_PASSPHRASE: "Standalone Network ; February 2017"
     ports:
       - "8000:8000"
       - "11626:11626"
-    command: --standalone --enable-soroban-rpc
-    environment:
-      - STELLAR_NETWORK=standalone
-      - ENABLE_SOROBAN_RPC=true
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:8000/ | grep -q 'Stellar' || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 5s
       timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-net-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 10
 
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: ai-net-backend
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=development
-      - PORT=3000
-      - DATABASE_URL=sqlite:///app/data/ai_net.db
-      - SOROBAN_RPC_URL=http://stellar-standalone:8000/soroban/rpc
-      - STELLAR_HORIZON_URL=http://stellar-standalone:8000
-      - VENICE_API_KEY=${VENICE_API_KEY:-mock_local_key}
-      - SKIP_STELLAR_ACCOUNT_VERIFY=true
+  contract-deployer:
+    image: node:20-alpine
+    container_name: ai-net-contract-deployer
+    working_dir: /workspace
     volumes:
-      - sqlite_data:/app/data
+      - .:/workspace
+    environment:
+      NODE_ENV: development
+      STELLAR_NETWORK: standalone
+      STELLAR_HORIZON_URL: http://stellar-standalone:8000
+      STELLAR_RPC_URL: http://stellar-standalone:8000/soroban/rpc
+      STELLAR_SECRET_KEY: ${STELLAR_SECRET_KEY:-}
+      SOROBAN_RPC_URL: http://stellar-standalone:8000/soroban/rpc
     depends_on:
       stellar-standalone:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    entrypoint: >
+      sh -lc "npm install --prefix smart-contracts && if [ -n \"$${STELLAR_SECRET_KEY}\" ]; then \
+      cd /workspace && STELLAR_SECRET_KEY=$${STELLAR_SECRET_KEY} STELLAR_RPC_URL=$${STELLAR_RPC_URL} \
+      STELLAR_HORIZON_URL=$${STELLAR_HORIZON_URL} ./smart-contracts/scripts/deploy.sh --network testnet; \
+      else echo 'STELLAR_SECRET_KEY not set; skipping contract deployment'; fi"
+    restart: "no"
+
+  backend:
+    image: node:20-alpine
+    container_name: ai-net-backend
+    working_dir: /workspace
+    command: >
+      sh -lc "npm install --prefix backend && npm --prefix backend run dev"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_URL: sqlite:///workspace/backend/data/ai-net.db
+      REDIS_URL: redis://redis:6379
+      STELLAR_NETWORK: standalone
+      STELLAR_HORIZON_URL: http://stellar-standalone:8000
+      SOROBAN_RPC_URL: http://stellar-standalone:8000/soroban/rpc
+      VENICE_API_KEY: ${VENICE_API_KEY:-mock_local_key}
+      SKIP_STELLAR_ACCOUNT_VERIFY: 'true'
+      ALLOWED_ORIGINS: http://localhost:5173
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/workspace/backend
+      - ./package.json:/workspace/package.json
+      - ./tsconfig.json:/workspace/tsconfig.json
+      - backend_data:/workspace/backend/data
+    depends_on:
+      stellar-standalone:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      contract-deployer:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(() => process.exit(0)).catch(() => process.exit(1))\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
 
   frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
+    image: node:20-alpine
     container_name: ai-net-frontend
+    working_dir: /workspace
+    command: >
+      sh -lc "npm install --prefix frontend && npm --prefix frontend run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      NODE_ENV: development
+      VITE_API_BASE_URL: http://localhost:3000
+      VITE_STELLAR_NETWORK: standalone
+      VITE_SOROBAN_RPC_URL: http://localhost:8000/soroban/rpc
+      CHOKIDAR_USEPOLLING: 'true'
     ports:
       - "5173:5173"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:3000
-      - VITE_STELLAR_NETWORK=standalone
-      - VITE_SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+    volumes:
+      - ./frontend:/workspace/frontend
+      - ./package.json:/workspace/package.json
+      - ./tsconfig.json:/workspace/tsconfig.json
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173').then(() => process.exit(0)).catch(() => process.exit(1))\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  # ── Monitoring profile ────────────────────────────────────────────────────
+  # Start with: docker compose --profile monitoring up
+  #
+  # Services:
+  #   prometheus  — scrapes /metrics from the backend every 15s
+  #   grafana     — pre-provisioned with Prometheus datasource and ai-net dashboard
+  #
+  # Endpoints (when monitoring profile is active):
+  #   Prometheus: http://localhost:9090
+  #   Grafana:    http://localhost:3001  (admin / admin)
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: ai-net-prometheus
+    profiles: [monitoring]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ai-net-grafana
+    profiles: [monitoring]
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana-dashboard.json:/etc/grafana/dashboards/ai-net-observability.json:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  sqlite_data:
+  backend_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
     driver: local

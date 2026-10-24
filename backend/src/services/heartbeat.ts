@@ -4,12 +4,10 @@ import { createLogger } from "../utils/logger";
 const logger = createLogger({ module: "heartbeat" });
 
 export interface HeartbeatServiceOptions {
-  /** Background interval in ms (default: 300,000 / 5 minutes) */
+  /** Background interval in ms (default: 30 seconds) */
   intervalMs?: number;
-  /** Minutes threshold after which online agents with no heartbeat are marked offline (default: 5) */
-  staleThresholdMinutes?: number;
-  /** Hours threshold after which offline agents are permanently deleted (default: 24) */
-  offlineThresholdHours?: number;
+  /** Seconds without a heartbeat before an agent is marked offline (default: 90) */
+  staleThresholdSeconds?: number;
   /** Custom AgentDb instance for testing */
   db?: AgentDb;
 }
@@ -20,9 +18,10 @@ export interface HeartbeatService {
 }
 
 export function createHeartbeatService(options: HeartbeatServiceOptions = {}): HeartbeatService {
-  const intervalMs = options.intervalMs ?? 300_000;
-  const staleThresholdMinutes = options.staleThresholdMinutes ?? 5;
-  const offlineThresholdHours = options.offlineThresholdHours ?? 24;
+  const intervalMs = options.intervalMs ?? Number(process.env.HEARTBEAT_INTERVAL_MS ?? 30_000);
+  const staleThresholdSeconds = options.staleThresholdSeconds ?? Math.floor(
+    Number(process.env.HEARTBEAT_GRACE_PERIOD_MS ?? 90_000) / 1000,
+  );
   let timer: NodeJS.Timeout | null = null;
 
   const getDb = () => options.db ?? createAgentDb(getAgentDb());
@@ -30,11 +29,10 @@ export function createHeartbeatService(options: HeartbeatServiceOptions = {}): H
   function runCleanup() {
     try {
       const db = getDb();
-      const markedOffline = db.markStaleAgents(staleThresholdMinutes);
-      const deleted = db.deleteOfflineAgents(offlineThresholdHours);
+      const markedOffline = db.markStaleAgents(staleThresholdSeconds);
 
-      if (markedOffline > 0 || deleted > 0) {
-        logger.info(`Heartbeat cleanup: ${markedOffline} marked offline, ${deleted} deleted`);
+      if (markedOffline > 0) {
+        logger.info(`Heartbeat cleanup: ${markedOffline} marked offline`);
       }
     } catch (err) {
       logger.error({ error: err }, "Heartbeat cleanup failed");

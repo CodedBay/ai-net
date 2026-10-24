@@ -61,6 +61,12 @@ export interface EventStore {
   /** All events for a task in chronological order (full replay). */
   listByTask(taskId: string): StoredEvent[];
 
+  /** A bounded task history page, optionally constrained by time and cursor. */
+  listByTaskPage(
+    taskId: string,
+    options: { until?: string; afterTaskSeq?: number; limit: number },
+  ): StoredEvent[];
+
   /**
    * Events for a task with `taskSeq` strictly greater than `afterSeq`.
    * Used for cursor-based WebSocket stream resume.
@@ -199,6 +205,15 @@ export function createEventStore(db?: Database.Database | string): EventStore {
     ORDER BY task_seq ASC
   `);
 
+  const listByTaskPageStmt = database.prepare(`
+    SELECT * FROM task_events
+    WHERE task_id = ?
+      AND (? IS NULL OR task_seq > ?)
+      AND (? IS NULL OR occurred_at <= ?)
+    ORDER BY task_seq ASC
+    LIMIT ?
+  `);
+
   const listByTimeRangeStmt = database.prepare(`
     SELECT * FROM task_events
     WHERE occurred_at >= ? AND occurred_at <= ?
@@ -259,6 +274,19 @@ export function createEventStore(db?: Database.Database | string): EventStore {
 
     listByTask(taskId: string): StoredEvent[] {
       return (listByTaskStmt.all(taskId) as EventRow[]).map(rowToStoredEvent);
+    },
+
+    listByTaskPage(taskId, { until, afterTaskSeq, limit }): StoredEvent[] {
+      return (
+        listByTaskPageStmt.all(
+          taskId,
+          afterTaskSeq ?? null,
+          afterTaskSeq ?? null,
+          until ?? null,
+          until ?? null,
+          limit,
+        ) as EventRow[]
+      ).map(rowToStoredEvent);
     },
 
     listByTaskSince(taskId: string, afterSeq: number): StoredEvent[] {

@@ -104,6 +104,10 @@ describe('BigInt Stroop Conversion Calculations', () => {
   });
 });
 
+// FLAKY: this suite patches global.setTimeout to skip delays. If tests share
+// the same global and a previous test's teardown races this beforeAll, the
+// original setTimeout may already be overwritten, causing leaks into other
+// suites. Tracked in #95.
 describe('Unit Tests with Mocked Horizon', () => {
   let coordinatorKeypair: Keypair;
   let agentKeypair: Keypair;

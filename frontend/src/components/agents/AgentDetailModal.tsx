@@ -1,11 +1,14 @@
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, X } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import { ReputationStars } from './ReputationStars'
 import { useAgentReputation } from '../../hooks/useAgentReputation'
 import { AgentReputationRadar } from './AgentReputationRadar'
 import { AgentReputationTrend } from './AgentReputationTrend'
 import { SkeletonText } from '../common/Skeleton'
+import { ConfirmDialog } from '../common/ConfirmDialog'
+import { useFocusTrap } from '../../hooks/useFocusTrap'
 import styles from './AgentDetailModal.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
@@ -13,14 +16,21 @@ const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 interface AgentDetailModalProps {
   agent: AgentRecord | null
   onClose: () => void
+  /** Optional: called after the user confirms deregistration */
+  onDeregister?: (agentId: string) => void
 }
 
-export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
+export function AgentDetailModal({ agent, onClose, onDeregister }: AgentDetailModalProps) {
   const { t } = useTranslation()
+  const [showDeregisterConfirm, setShowDeregisterConfirm] = useState(false)
   // Called unconditionally (hook rules) — it no-ops on an empty id, which is
   // what the closed-modal case passes.
   const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id ?? '')
 
+  // Focus trap for accessibility (WCAG 2.1 — no keyboard trap, APG dialog pattern)
+  const dialogRef = useFocusTrap<HTMLDivElement>(!!agent)
+
+  // Escape key closes the modal (WCAG 2.1 AA — keyboard accessible)
   useEffect(() => {
     if (!agent) return
     const onKey = (e: KeyboardEvent) => {
@@ -30,35 +40,66 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
     return () => document.removeEventListener('keydown', onKey)
   }, [agent, onClose])
 
+  const handleDeregisterConfirm = () => {
+    setShowDeregisterConfirm(false)
+    if (agent && onDeregister) onDeregister(agent.id)
+    onClose()
+  }
+
   if (!agent) return null
 
-  return (
-    <Modal
-      open={!!agent}
-      onClose={onClose}
-      title={agent ? t('a11y.detailsFor', { name: agent.name }) : ''}
-      data-testid="agent-detail-modal"
-    >
-      {agent && (
-        <>
-          <div className={styles.header}>
-            <div>
-              <h2 className={styles.title}>{agent.name}</h2>
-              <code className={styles.id} title={agent.id}>
-                {agent.id}
-              </code>
-            </div>
-          </div>
+  const titleId = 'agent-detail-modal-title'
 
-          <dl className={styles.grid}>
+  return (
+    /* Backdrop */
+    <div
+      className={styles.overlay}
+      onClick={onClose}
+      role="presentation"
+    >
+      {/* Dialog — stops click propagation to backdrop */}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={styles.dialog}
+        data-testid="agent-detail-modal"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          type="button"
+          className={styles.closeButton}
+          onClick={onClose}
+          aria-label={t('common.close', { defaultValue: 'Close' })}
+          data-testid="agent-detail-modal-close"
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
+
+        <div className={styles.header}>
+          <div>
+            <h2 id={titleId} className={styles.title}>{agent.name}</h2>
+            <code className={styles.id} title={agent.id}>
+              {agent.id}
+            </code>
+          </div>
+        </div>
+
+        <dl className={styles.grid}>
           <div className={styles.field}>
             <dt>{t('common.status')}</dt>
             <dd>
+              {/* Status badge: uses text + icon, not color alone (WCAG 1.4.1) */}
               <span
                 className={`${styles.status} ${
                   agent.status === 'active' ? styles.statusActive : styles.statusInactive
                 }`}
+                role="status"
               >
+                <span className={styles.statusDot} aria-hidden="true" />
                 {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
               </span>
             </dd>
@@ -133,9 +174,32 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
               )}
             </dd>
           </div>
-          </dl>
-        </>
-      )}
-    </Modal>
+        </dl>
+
+        {onDeregister && (
+          <div className={styles.dangerZone}>
+            <button
+              type="button"
+              className={styles.deregisterButton}
+              onClick={() => setShowDeregisterConfirm(true)}
+              data-testid="deregister-agent-btn"
+            >
+              {t('agent.modal.deregister', { defaultValue: 'Deregister Agent' })}
+            </button>
+          </div>
+        )}
+
+        <ConfirmDialog
+          open={showDeregisterConfirm}
+          title={t('agent.deregisterConfirm.title', { defaultValue: 'Deregister Agent?' })}
+          description={t('agent.deregisterConfirm.description', { defaultValue: `You are about to permanently deregister "${agent.name}" from the network.` })}
+          consequence={t('agent.deregisterConfirm.consequence', { defaultValue: 'This agent will be removed from the registry. All task history associations will be lost and cannot be recovered.' })}
+          confirmLabel={t('agent.deregisterConfirm.confirm', { defaultValue: 'Deregister Agent' })}
+          cancelLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+          onConfirm={handleDeregisterConfirm}
+          onCancel={() => setShowDeregisterConfirm(false)}
+        />
+      </div>
+    </div>
   )
 }

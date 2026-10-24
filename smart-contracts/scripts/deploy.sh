@@ -1,311 +1,318 @@
 #!/bin/bash
+# deploy.sh — Deploy Soroban smart contracts in dependency order.
+#
+# Usage: ./deploy.sh [OPTIONS]
+#   -n, --network   testnet | mainnet | standalone  (default: testnet)
+#   -s, --skip-build  Skip the Wasm build step
+#   -v, --verify      Run verify.sh after successful deployment
+#   -h, --help        Show this help message
+#
+# Required environment variables:
+#   STELLAR_SECRET_KEY     Account secret key for deployment
+#
+# Optional environment variables:
+#   STELLAR_RPC_URL        Override default RPC endpoint
+#   STELLAR_HORIZON_URL    Override default Horizon endpoint
 
-set -e
+set -euo pipefail
 
-# Colors for output
+# ─── Colours ─────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+BOLD='\033[1m'
+NC='\033[0m'
 
-# Default values
+# ─── Defaults ─────────────────────────────────────────────────────────────────
 NETWORK="testnet"
 SKIP_BUILD=false
 VERIFY=false
 
-# Usage function
+# ─── Usage ────────────────────────────────────────────────────────────────────
 usage() {
-    cat << EOF
-Usage: $0 [OPTIONS]
+  cat <<EOF
+${BOLD}Usage:${NC} $0 [OPTIONS]
 
-Deploy Soroban contracts to the specified network.
+Deploy Soroban contracts to the specified network in dependency order:
+  Registry → TaskStore → PaymentEscrow
 
-OPTIONS:
-    -n, --network NETWORK     Network to deploy to (testnet, futurenet, mainnet) [default: testnet]
-    -s, --skip-build         Skip the Wasm build step
-    -v, --verify             Verify deployment after completion
-    -h, --help               Show this help message
+${BOLD}OPTIONS:${NC}
+  -n, --network NETWORK     Target network: testnet | mainnet | standalone  [default: testnet]
+  -s, --skip-build          Skip the Wasm build step
+  -v, --verify              Run verify.sh after successful deployment
+  -h, --help                Show this help message
 
-ENVIRONMENT VARIABLES:
-    STELLAR_SECRET_KEY       Secret key for deployment account (required)
-    STELLAR_RPC_URL         RPC URL for the network (optional, uses default for network)
-    STELLAR_HORIZON_URL     Horizon URL for the network (optional, uses default for network)
+${BOLD}REQUIRED ENVIRONMENT VARIABLES:${NC}
+  STELLAR_SECRET_KEY        Secret key for the deployment account
 
-EXAMPLES:
-    $0                       Deploy to testnet
-    $0 -n futurenet         Deploy to futurenet
-    $0 -s -v               Skip build and verify deployment
+${BOLD}OPTIONAL ENVIRONMENT VARIABLES:${NC}
+  STELLAR_RPC_URL           Override the default Soroban RPC endpoint
+  STELLAR_HORIZON_URL       Override the default Horizon endpoint
+
+${BOLD}EXAMPLES:${NC}
+  $0                                Deploy to testnet
+  $0 -n mainnet                     Deploy to mainnet
+  $0 -n standalone -s               Deploy to standalone, skipping build
+  $0 -v                             Deploy to testnet and run verification
 EOF
 }
 
-# Parse command line arguments
+# ─── Argument parsing ─────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--network)
-            NETWORK="$2"
-            shift 2
-            ;;
-        -s|--skip-build)
-            SKIP_BUILD=true
-            shift
-            ;;
-        -v|--verify)
-            VERIFY=true
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}Unknown option: $1${NC}" >&2
-            usage >&2
-            exit 1
-            ;;
-    esac
+  case "$1" in
+    -n|--network)
+      NETWORK="$2"
+      shift 2
+      ;;
+    -s|--skip-build)
+      SKIP_BUILD=true
+      shift
+      ;;
+    -v|--verify)
+      VERIFY=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo -e "${RED}Unknown option: $1${NC}" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
 done
 
-# Validate network
-case $NETWORK in
-    testnet|futurenet|mainnet)
-        ;;
-    *)
-        echo -e "${RED}Error: Invalid network '$NETWORK'. Must be one of: testnet, futurenet, mainnet${NC}" >&2
-        exit 1
-        ;;
+# ─── Validate network ─────────────────────────────────────────────────────────
+case "$NETWORK" in
+  testnet|mainnet|standalone) ;;
+  *)
+    echo -e "${RED}Error: Invalid network '${NETWORK}'. Must be: testnet | mainnet | standalone${NC}" >&2
+    exit 1
+    ;;
 esac
 
-# Check required environment variables
-if [[ -z "$STELLAR_SECRET_KEY" ]]; then
-    echo -e "${RED}Error: STELLAR_SECRET_KEY environment variable is required${NC}" >&2
-    exit 1
-fi
+# ─── Validate required environment variables ──────────────────────────────────
+validate_env() {
+  local missing=()
 
-# Set network-specific defaults
-set_network_defaults() {
-    case $NETWORK in
-        testnet)
-            : ${STELLAR_RPC_URL:=https://soroban-testnet.stellar.org}
-            : ${STELLAR_HORIZON_URL:=https://horizon-testnet.stellar.org}
-            ;;
-        futurenet)
-            : ${STELLAR_RPC_URL:=https://rpc-futurenet.stellar.org}
-            : ${STELLAR_HORIZON_URL:=https://horizon-futurenet.stellar.org}
-            ;;
-        mainnet)
-            : ${STELLAR_RPC_URL:=https://soroban-rpc.stellar.org}
-            : ${STELLAR_HORIZON_URL:=https://horizon.stellar.org}
-            ;;
-    esac
-    export STELLAR_RPC_URL STELLAR_HORIZON_URL
+  [[ -z "${STELLAR_SECRET_KEY:-}" ]] && missing+=("STELLAR_SECRET_KEY")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo -e "${RED}${BOLD}Error: Missing required environment variable(s):${NC}" >&2
+    for var in "${missing[@]}"; do
+      echo -e "${RED}  • ${var}${NC}" >&2
+    done
+    echo "" >&2
+    echo -e "${YELLOW}Hint: Copy .env.example to .env and fill in the required values, then:${NC}" >&2
+    echo -e "${YELLOW}  export \$(grep -v '^#' .env | xargs)${NC}" >&2
+    exit 1
+  fi
 }
 
-# Contract names and paths
-CONTRACTS=(
-    "agent-registry:contracts/agent_registry"
-    "error-resolver:contracts/error-resolver"
-)
+# ─── Network defaults ─────────────────────────────────────────────────────────
+set_network_defaults() {
+  case "$NETWORK" in
+    testnet)
+      STELLAR_RPC_URL="${STELLAR_RPC_URL:-https://soroban-testnet.stellar.org}"
+      STELLAR_HORIZON_URL="${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}"
+      NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+      ;;
+    mainnet)
+      STELLAR_RPC_URL="${STELLAR_RPC_URL:-https://soroban-rpc.stellar.org}"
+      STELLAR_HORIZON_URL="${STELLAR_HORIZON_URL:-https://horizon.stellar.org}"
+      NETWORK_PASSPHRASE="Public Global Stellar Network ; September 2015"
+      ;;
+    standalone)
+      STELLAR_RPC_URL="${STELLAR_RPC_URL:-http://localhost:8000/soroban/rpc}"
+      STELLAR_HORIZON_URL="${STELLAR_HORIZON_URL:-http://localhost:8000}"
+      NETWORK_PASSPHRASE="Standalone Network ; February 2017"
+      ;;
+  esac
+  export STELLAR_RPC_URL STELLAR_HORIZON_URL NETWORK_PASSPHRASE
+}
 
-# Directories
+# ─── Dependency check ─────────────────────────────────────────────────────────
+check_dependencies() {
+  local missing=()
+  for dep in jq sha256sum; do
+    command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
+  done
+  if [[ "$SKIP_BUILD" == "false" ]]; then
+    command -v cargo >/dev/null 2>&1 || missing+=("cargo")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo -e "${RED}Error: Required tools not found: ${missing[*]}${NC}" >&2
+    exit 1
+  fi
+}
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DEPLOYMENTS_DIR="$PROJECT_ROOT/deployments"
 TARGET_DIR="$PROJECT_ROOT/target/wasm32-unknown-unknown/release"
-
-# Deployment metadata
 DEPLOYMENT_FILE="$DEPLOYMENTS_DIR/${NETWORK}.json"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-echo -e "${BLUE}=== ai-net Smart Contract Deployment ===${NC}"
-echo -e "${BLUE}Network:${NC} $NETWORK"
-echo -e "${BLUE}RPC URL:${NC} $STELLAR_RPC_URL"
-echo -e "${BLUE}Deployment file:${NC} $DEPLOYMENT_FILE"
-echo ""
+# ─── Contract deployment order (Registry → TaskStore → PaymentEscrow) ─────────
+# Format: "contract-name:wasm-filename-stem:path-hint"
+# Contracts are deployed in this exact order to respect on-chain dependencies.
+CONTRACTS=(
+  "agent-registry:agent_registry:contracts/agent_registry"
+  "task-store:task_store:contracts/task_store"
+  "payment-escrow:payment_escrow:contracts/payment_escrow"
+  "error-resolver:error_resolver:contracts/error-resolver"
+)
 
-# Initialize deployment metadata
-init_deployment_metadata() {
-    local metadata
-    if [[ -f "$DEPLOYMENT_FILE" ]]; then
-        metadata=$(cat "$DEPLOYMENT_FILE")
-    else
-        metadata='{}'
-    fi
-    
-    # Update metadata with deployment info
-    metadata=$(echo "$metadata" | jq --arg network "$NETWORK" --arg timestamp "$TIMESTAMP" --arg rpc_url "$STELLAR_RPC_URL" --arg horizon_url "$STELLAR_HORIZON_URL" '
-        {
-            network: $network,
-            rpc_url: $rpc_url,
-            horizon_url: $horizon_url,
-            deployed_at: $timestamp,
-            contracts: (.contracts // {}),
-            deployment_history: (.deployment_history // [])
-        }
-    ')
-    echo "$metadata" > "$DEPLOYMENT_FILE"
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+log_info()    { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[OK]${NC}   $*"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+init_deployment_file() {
+  mkdir -p "$DEPLOYMENTS_DIR"
+  local existing="{}"
+  [[ -f "$DEPLOYMENT_FILE" ]] && existing="$(cat "$DEPLOYMENT_FILE")"
+
+  echo "$existing" | jq \
+    --arg network "$NETWORK" \
+    --arg rpc "$STELLAR_RPC_URL" \
+    --arg horizon "$STELLAR_HORIZON_URL" \
+    --arg ts "$TIMESTAMP" \
+    '{
+      network: $network,
+      rpc_url: $rpc,
+      horizon_url: $horizon,
+      deployed_at: $ts,
+      contracts: (.contracts // {}),
+      deployment_history: (.deployment_history // [])
+    }' > "$DEPLOYMENT_FILE"
 }
 
-# Build contracts
+# ─── Build ────────────────────────────────────────────────────────────────────
 build_contracts() {
-    if [[ "$SKIP_BUILD" == "true" ]]; then
-        echo -e "${YELLOW}Skipping build step${NC}"
-        return
-    fi
-
-    echo -e "${BLUE}Building contracts...${NC}"
-    cd "$PROJECT_ROOT"
-    
-    # Build all contracts in workspace
-    cargo build --target wasm32-unknown-unknown --release
-    
-    # Optimize Wasm files
-    for contract_info in "${CONTRACTS[@]}"; do
-        IFS=':' read -r name path <<< "$contract_info"
-        wasm_file="$TARGET_DIR/${name//-/_}.wasm"
-        
-        if [[ -f "$wasm_file" ]]; then
-            echo -e "${GREEN}✓ Built $name${NC}"
-        else
-            echo -e "${RED}✗ Failed to build $name (expected: $wasm_file)${NC}" >&2
-            exit 1
-        fi
-    done
-    
-    echo ""
-}
-
-# Calculate Wasm hash
-calculate_wasm_hash() {
-    local wasm_file="$1"
-    sha256sum "$wasm_file" | cut -d' ' -f1
-}
-
-# Deploy a single contract
-deploy_contract() {
-    local name="$1"
-    local wasm_file="$2"
-    
-    echo -e "${BLUE}Deploying $name...${NC}"
-    
-    # Calculate Wasm hash for verification
-    local wasm_hash
-    wasm_hash=$(calculate_wasm_hash "$wasm_file")
-    
-    # Deploy the contract
-    local contract_id
-    contract_id=$(soroban contract deploy \
-        --wasm "$wasm_file" \
-        --source "$STELLAR_SECRET_KEY" \
-        --rpc-url "$STELLAR_RPC_URL" \
-        --network-passphrase "$(get_network_passphrase)" \
-        2>/dev/null | grep -o 'C[A-Z0-9]\{55\}' | head -1)
-    
-    if [[ -z "$contract_id" ]]; then
-        echo -e "${RED}✗ Failed to deploy $name${NC}" >&2
-        return 1
-    fi
-    
-    echo -e "${GREEN}✓ Deployed $name${NC}"
-    echo -e "${BLUE}  Contract ID:${NC} $contract_id"
-    echo -e "${BLUE}  Wasm Hash:${NC} $wasm_hash"
-    
-    # Update deployment metadata
-    local metadata
-    metadata=$(cat "$DEPLOYMENT_FILE")
-    metadata=$(echo "$metadata" | jq --arg name "$name" --arg contract_id "$contract_id" --arg wasm_hash "$wasm_hash" --arg timestamp "$TIMESTAMP" '
-        .contracts[$name] = {
-            contract_id: $contract_id,
-            wasm_hash: $wasm_hash,
-            deployed_at: $timestamp
-        }
-    ')
-    echo "$metadata" > "$DEPLOYMENT_FILE"
-    
+  if [[ "$SKIP_BUILD" == "true" ]]; then
+    log_warn "Skipping Wasm build (--skip-build)"
     return 0
+  fi
+
+  log_info "Building contracts (cargo build --target wasm32-unknown-unknown --release)…"
+  cd "$PROJECT_ROOT"
+  if ! cargo build --target wasm32-unknown-unknown --release 2>&1; then
+    log_error "cargo build failed"
+    exit 1
+  fi
+  log_success "Contracts built"
+  echo ""
 }
 
-# Get network passphrase
-get_network_passphrase() {
-    case $NETWORK in
-        testnet)
-            echo "Test SDF Network ; September 2015"
-            ;;
-        futurenet)
-            echo "Test SDF Future Network ; October 2022"
-            ;;
-        mainnet)
-            echo "Public Global Stellar Network ; September 2015"
-            ;;
-    esac
+# ─── Deploy one contract ──────────────────────────────────────────────────────
+deploy_contract() {
+  local name="$1"
+  local wasm_stem="$2"
+  local wasm_file="$TARGET_DIR/${wasm_stem}.wasm"
+
+  log_info "Deploying ${BOLD}${name}${NC}…"
+
+  if [[ ! -f "$wasm_file" ]]; then
+    # Contract may not exist in this workspace — skip gracefully
+    log_warn "Wasm file not found: ${wasm_file} — skipping ${name}"
+    return 0
+  fi
+
+  local wasm_hash
+  wasm_hash="$(sha256sum "$wasm_file" | cut -d' ' -f1)"
+
+  # Deploy
+  local deploy_output
+  if ! deploy_output="$(soroban contract deploy \
+      --wasm "$wasm_file" \
+      --source "$STELLAR_SECRET_KEY" \
+      --rpc-url "$STELLAR_RPC_URL" \
+      --network-passphrase "$NETWORK_PASSPHRASE" \
+      2>&1)"; then
+    log_error "Failed to deploy ${name}: ${deploy_output}"
+    return 1
+  fi
+
+  local contract_id
+  contract_id="$(echo "$deploy_output" | grep -oE 'C[A-Z0-9]{55}' | head -1 || true)"
+
+  if [[ -z "$contract_id" ]]; then
+    log_error "Could not parse contract ID from deploy output for ${name}:"
+    echo "$deploy_output" >&2
+    return 1
+  fi
+
+  log_success "Deployed ${name}"
+  log_info "  Contract ID : ${contract_id}"
+  log_info "  Wasm hash   : ${wasm_hash}"
+
+  # Persist to deployments.json
+  local updated
+  updated="$(cat "$DEPLOYMENT_FILE" | jq \
+    --arg name "$name" \
+    --arg id "$contract_id" \
+    --arg hash "$wasm_hash" \
+    --arg ts "$TIMESTAMP" \
+    '.contracts[$name] = { contract_id: $id, wasm_hash: $hash, deployed_at: $ts }')"
+  echo "$updated" > "$DEPLOYMENT_FILE"
+
+  return 0
 }
 
-# Verify deployment
-verify_deployment() {
-    if [[ "$VERIFY" != "true" ]]; then
-        return
-    fi
-    
-    echo -e "${BLUE}Verifying deployment...${NC}"
-    cd "$SCRIPT_DIR"
-    ./verify.sh --network "$NETWORK" --deployment-file "$DEPLOYMENT_FILE"
-}
-
-# Main execution
+# ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
-    set_network_defaults
-    init_deployment_metadata
-    build_contracts
-    
-    echo -e "${BLUE}Deploying contracts to $NETWORK...${NC}"
-    echo ""
-    
-    local deployment_success=true
-    for contract_info in "${CONTRACTS[@]}"; do
-        IFS=':' read -r name path <<< "$contract_info"
-        wasm_file="$TARGET_DIR/${name//-/_}.wasm"
-        
-        if ! deploy_contract "$name" "$wasm_file"; then
-            deployment_success=false
-        fi
-        echo ""
-    done
-    
-    if [[ "$deployment_success" == "true" ]]; then
-        echo -e "${GREEN}=== Deployment completed successfully ===${NC}"
-        echo -e "${BLUE}Deployment metadata saved to:${NC} $DEPLOYMENT_FILE"
-        
-        # Add to deployment history
-        local metadata
-        metadata=$(cat "$DEPLOYMENT_FILE")
-        metadata=$(echo "$metadata" | jq --arg timestamp "$TIMESTAMP" --arg action "deploy" '
-            .deployment_history += [{
-                action: $action,
-                timestamp: $timestamp,
-                network: .network,
-                contracts: (.contracts | keys)
-            }]
-        ')
-        echo "$metadata" > "$DEPLOYMENT_FILE"
-        
-        verify_deployment
-    else
-        echo -e "${RED}=== Deployment failed ===${NC}" >&2
-        exit 1
+  echo -e "${BOLD}${BLUE}═══ ai-net Smart Contract Deployment ═══${NC}"
+  echo -e "Network    : ${BOLD}${NETWORK}${NC}"
+  echo -e "RPC URL    : ${STELLAR_RPC_URL}"
+  echo -e "Horizon URL: ${STELLAR_HORIZON_URL}"
+  echo -e "Output     : ${DEPLOYMENT_FILE}"
+  echo ""
+
+  init_deployment_file
+  build_contracts
+
+  echo -e "${BLUE}Deploying contracts in dependency order…${NC}"
+  echo ""
+
+  local failed=false
+  for entry in "${CONTRACTS[@]}"; do
+    IFS=':' read -r name wasm_stem _path <<< "$entry"
+    if ! deploy_contract "$name" "$wasm_stem"; then
+      failed=true
     fi
+    echo ""
+  done
+
+  if [[ "$failed" == "true" ]]; then
+    log_error "One or more contracts failed to deploy."
+    exit 1
+  fi
+
+  # Record history
+  local history_entry
+  history_entry="$(cat "$DEPLOYMENT_FILE" | jq \
+    --arg ts "$TIMESTAMP" \
+    --arg net "$NETWORK" \
+    '.deployment_history += [{ action: "deploy", timestamp: $ts, network: $net, contracts: (.contracts | keys) }]')"
+  echo "$history_entry" > "$DEPLOYMENT_FILE"
+
+  echo -e "${GREEN}${BOLD}═══ Deployment completed successfully ═══${NC}"
+  echo -e "Deployment record saved to: ${BOLD}${DEPLOYMENT_FILE}${NC}"
+  echo ""
+
+  if [[ "$VERIFY" == "true" ]]; then
+    log_info "Running verification…"
+    "$SCRIPT_DIR/verify.sh" --network "$NETWORK"
+  fi
 }
 
-# Check dependencies
-check_dependencies() {
-    local deps=("soroban" "jq" "cargo" "sha256sum")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" >/dev/null 2>&1; then
-            echo -e "${RED}Error: Required dependency '$dep' not found${NC}" >&2
-            exit 1
-        fi
-    done
-}
-
-# Entry point
+validate_env
 check_dependencies
+set_network_defaults
 main "$@"

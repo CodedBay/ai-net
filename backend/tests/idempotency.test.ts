@@ -54,6 +54,26 @@ describe('IdempotencyStore', () => {
       expect(store.get('key-a')!.statusCode).toBe(201);
       expect(store.get('key-b')!.statusCode).toBe(200);
     });
+
+    it('scopes the same key to different wallets', () => {
+      store.storeResponse('shared-key', 201, { wallet: 'a' }, 'wallet-a');
+      store.storeResponse('shared-key', 201, { wallet: 'b' }, 'wallet-b');
+
+      expect(JSON.parse(store.get('shared-key', 'wallet-a')!.responseBody)).toEqual({ wallet: 'a' });
+      expect(JSON.parse(store.get('shared-key', 'wallet-b')!.responseBody)).toEqual({ wallet: 'b' });
+    });
+
+    it('stores and returns the request payload hash', () => {
+      store.storeResponse('hashed-key', 201, { ok: true }, 'anonymous', 'sha256-abc');
+
+      expect(store.get('hashed-key')!.requestHash).toBe('sha256-abc');
+    });
+
+    it('defaults requestHash to null when omitted', () => {
+      store.storeResponse('legacy-key', 201, { ok: true });
+
+      expect(store.get('legacy-key')!.requestHash).toBeNull();
+    });
   });
 
   describe('TTL expiry', () => {
@@ -178,7 +198,7 @@ describe('Idempotency Middleware', () => {
   it('passes through on the first request with an Idempotency-Key', async () => {
     const res = await request(app)
       .post('/api/tasks')
-      .set('Idempotency-Key', 'idem-key-1')
+      .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
       .send({ prompt: 'hello' });
 
     expect(res.status).toBe(201);
@@ -190,7 +210,7 @@ describe('Idempotency Middleware', () => {
     // First request — creates the task.
     const first = await request(app)
       .post('/api/tasks')
-      .set('idempotency-key', 'idem-key-2')
+      .set('idempotency-key', '22222222-2222-4222-8222-222222222222')
       .send({ prompt: 'hello' });
 
     expect(first.status).toBe(201);
@@ -200,23 +220,40 @@ describe('Idempotency Middleware', () => {
     // Second request with the same key — should replay, not create.
     const second = await request(app)
       .post('/api/tasks')
-      .set('idempotency-key', 'idem-key-2')
+      .set('idempotency-key', '22222222-2222-4222-8222-222222222222')
       .send({ prompt: 'hello' });
 
     expect(second.status).toBe(201);
     expect(second.body.taskId).toBe('task_1'); // same as first
+    expect(second.headers['x-idempotency-replay']).toBe('true');
     expect(handlerCallCount).toBe(1); // handler NOT called again
+  });
+
+  it('does not replay a key across different wallets', async () => {
+    const key = '66666666-6666-4666-8666-666666666666';
+    const first = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send({ prompt: 'wallet A task', walletPublicKey: 'wallet-a' });
+    const second = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send({ prompt: 'wallet B task', walletPublicKey: 'wallet-b' });
+
+    expect(first.body.taskId).toBe('task_1');
+    expect(second.body.taskId).toBe('task_2');
+    expect(handlerCallCount).toBe(2);
   });
 
   it('creates separate tasks for different idempotency keys', async () => {
     const first = await request(app)
       .post('/api/tasks')
-      .set('idempotency-key', 'key-A')
+      .set('idempotency-key', '33333333-3333-4333-8333-333333333333')
       .send({ prompt: 'task A' });
 
     const second = await request(app)
       .post('/api/tasks')
-      .set('idempotency-key', 'key-B')
+      .set('idempotency-key', '44444444-4444-4444-8444-444444444444')
       .send({ prompt: 'task B' });
 
     expect(first.body.taskId).toBe('task_1');
@@ -241,7 +278,7 @@ describe('Idempotency Middleware', () => {
 
     const first = await request(errorApp)
       .post('/api/fail')
-      .set('idempotency-key', 'error-key')
+      .set('idempotency-key', '55555555-5555-4555-8555-555555555555')
       .send({});
 
     expect(first.status).toBe(400);
@@ -250,20 +287,89 @@ describe('Idempotency Middleware', () => {
     // Second request should NOT be replayed from cache — it should hit the handler again.
     const second = await request(errorApp)
       .post('/api/fail')
-      .set('idempotency-key', 'error-key')
+      .set('idempotency-key', '55555555-5555-4555-8555-555555555555')
       .send({});
 
     expect(second.status).toBe(400);
     expect(handlerCallCount).toBe(2); // handler called again
   });
 
-  it('ignores whitespace-only Idempotency-Key values', async () => {
+  it('rejects malformed Idempotency-Key values with 422', async () => {
+    const res = await request(app)
+      .post('/api/tasks')
+      .set('idempotency-key', 'not-a-uuid')
+      .send({ prompt: 'hello' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('INVALID_IDEMPOTENCY_KEY');
+    expect(handlerCallCount).toBe(0);
+  });
+
+  it('rejects whitespace-only Idempotency-Key values with 422', async () => {
     const res = await request(app)
       .post('/api/tasks')
       .set('idempotency-key', '   ')
       .send({ prompt: 'hello' });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(422);
+    expect(handlerCallCount).toBe(0);
+  });
+
+  it('returns 409 when the same key is reused with a different payload', async () => {
+    const key = '77777777-7777-4777-8777-777777777777';
+
+    const first = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send({ prompt: 'original payload' });
+
+    expect(first.status).toBe(201);
     expect(handlerCallCount).toBe(1);
+
+    const conflict = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send({ prompt: 'tampered payload' });
+
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('IDEMPOTENCY_PAYLOAD_MISMATCH');
+    expect(handlerCallCount).toBe(1); // handler still NOT called
+    expect(conflict.headers['x-idempotency-replay']).toBeUndefined();
+  });
+
+  it('replays identically-keyed requests that repeat the original payload', async () => {
+    const key = '88888888-8888-4888-8888-888888888888';
+    const payload = { prompt: 'stable payload', maxBudgetXLM: 1 };
+
+    const first = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send(payload);
+    const second = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send(payload);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.body.taskId).toBe(first.body.taskId);
+    expect(second.headers['x-idempotency-replay']).toBe('true');
+    expect(handlerCallCount).toBe(1);
+  });
+
+  it('replays entries stored without a payload hash (legacy back-compat)', async () => {
+    const key = '99999999-9999-4999-8999-999999999999';
+    // Simulate an entry persisted before request hashing existed.
+    store.storeResponse(key, 201, { taskId: 'task_legacy', status: 'queued' });
+
+    const res = await request(app)
+      .post('/api/tasks')
+      .set('Idempotency-Key', key)
+      .send({ prompt: 'anything' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.taskId).toBe('task_legacy');
+    expect(res.headers['x-idempotency-replay']).toBe('true');
+    expect(handlerCallCount).toBe(0);
   });
 });

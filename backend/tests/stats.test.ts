@@ -16,6 +16,7 @@ import express from "express";
 import request from "supertest";
 import Database from "better-sqlite3";
 import { createStatsRouter } from "../src/api/routes/stats";
+import { errorHandler } from "../src/api/middleware/errorHandler";
 
 /** Create an isolated in-memory database with all tables the stats queries need. */
 function createTestDb(): Database.Database {
@@ -46,6 +47,7 @@ function createTestApp(db: Database.Database) {
   const app = express();
   app.use(express.json());
   app.use("/api/stats", createStatsRouter(db));
+  app.use(errorHandler);
   return app;
 }
 

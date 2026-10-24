@@ -1,9 +1,10 @@
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NotificationProvider, NOTIFICATIONS_STORAGE_KEY } from '../../context/NotificationContext';
 import TopNav from '../layout/TopNav';
+import NotificationBell from './NotificationBell';
 import { WalletProvider } from '../../context/WalletContext';
 import type { AppNotification } from '../../types/notification';
 
@@ -165,6 +166,158 @@ describe('NotificationCenter Component', () => {
     expect(screen.getByText('Agent Status Changed')).toBeInTheDocument();
   });
 
+  test('shows at most the five most recent notifications', async () => {
+    const manyNotifications: AppNotification[] = Array.from({ length: 7 }, (_, index) => ({
+      id: `recent-${index}`,
+      type: 'system',
+      title: `Recent notification ${index}`,
+      message: `Message ${index}`,
+      timestamp: new Date(Date.now() - index * 60000).toISOString(),
+      read: false,
+    }));
+
+    renderTopNavWithProvider(manyNotifications);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('notification-bell-btn'));
+    });
+
+    expect(screen.getAllByTestId(/^notification-item-/)).toHaveLength(5);
+    expect(screen.getByTestId('notification-item-recent-0')).toBeInTheDocument();
+    expect(screen.getByTestId('notification-item-recent-4')).toBeInTheDocument();
+    expect(screen.queryByTestId('notification-item-recent-5')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('notification-item-recent-6')).not.toBeInTheDocument();
+  });
+
+  test('groups notifications by category with colored dots and per-group unread counts', async () => {
+    renderTopNavWithProvider(sampleNotifications);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('notification-bell-btn'));
+    });
+
+    const groupIds = screen
+      .getAllByTestId(/^notification-group-(payment|task|system)$/)
+      .map(group => group.getAttribute('data-testid'));
+    expect(groupIds).toEqual([
+      'notification-group-payment',
+      'notification-group-task',
+      'notification-group-system',
+    ]);
+
+    const paymentGroup = screen.getByTestId('notification-group-payment');
+    const taskGroup = screen.getByTestId('notification-group-task');
+    const systemGroup = screen.getByTestId('notification-group-system');
+
+    expect(within(paymentGroup).getByText('Payment')).toBeInTheDocument();
+    expect(within(taskGroup).getByText('Task')).toBeInTheDocument();
+    expect(within(systemGroup).getByText('System')).toBeInTheDocument();
+
+    expect(within(paymentGroup).getByText('Payment Released')).toBeInTheDocument();
+    expect(within(taskGroup).getByText('Task Completed')).toBeInTheDocument();
+    expect(within(systemGroup).getByText('Agent Status Changed')).toBeInTheDocument();
+
+    expect(screen.getByTestId('notification-group-unread-payment')).toHaveTextContent('1 unread');
+    expect(screen.getByTestId('notification-group-unread-task')).toHaveTextContent('1 unread');
+    expect(screen.getByTestId('notification-group-unread-system')).toHaveTextContent('0 unread');
+
+    expect(screen.getByTestId('notification-group-dot-payment')).toHaveClass('payment');
+    expect(screen.getByTestId('notification-group-dot-task')).toHaveClass('task');
+    expect(screen.getByTestId('notification-group-dot-system')).toHaveClass('system');
+  });
+
+  test('omits empty notification groups', async () => {
+    renderTopNavWithProvider([sampleNotifications[1]]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('notification-bell-btn'));
+    });
+
+    expect(screen.getByTestId('notification-group-payment')).toBeInTheDocument();
+    expect(screen.queryByTestId('notification-group-task')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('notification-group-system')).not.toBeInTheDocument();
+  });
+
+  test('truncates long titles to 40 characters and exposes the full title', async () => {
+    const longTitle = 'This notification title is intentionally much longer than forty characters';
+    const longTitleNotification: AppNotification = {
+      id: 'long-title-notification',
+      type: 'system',
+      title: longTitle,
+      message: 'Long title message',
+      timestamp: new Date().toISOString(),
+      read: false,
+    };
+
+    renderTopNavWithProvider([longTitleNotification]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('notification-bell-btn'));
+    });
+
+    const truncatedTitle = `${longTitle.slice(0, 40)}...`;
+    const titleElement = screen.getByText(truncatedTitle);
+    expect(titleElement).toHaveAttribute('title', longTitle);
+    expect(titleElement.textContent).toHaveLength(43);
+  });
+
+  test('View All navigates to the notifications page', async () => {
+    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(sampleNotifications));
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <NotificationProvider>
+          <Routes>
+            <Route path="/dashboard" element={<NotificationBell />} />
+            <Route
+              path="/notifications"
+              element={<div data-testid="notifications-route-page">All notifications</div>}
+            />
+          </Routes>
+        </NotificationProvider>
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('notification-bell-btn'));
+    });
+
+    const viewAllLink = screen.getByTestId('view-all-notifications-link');
+    expect(viewAllLink).toHaveAttribute('href', '/notifications');
+
+    await act(async () => {
+      fireEvent.click(viewAllLink);
+    });
+
+    expect(screen.getByTestId('notifications-route-page')).toBeInTheDocument();
+  });
+
+  test('implements the ARIA dialog pattern and manages focus', async () => {
+    renderTopNavWithProvider(sampleNotifications);
+
+    const bellBtn = screen.getByTestId('notification-bell-btn');
+
+    await act(async () => {
+      fireEvent.click(bellBtn);
+    });
+
+    const panel = screen.getByTestId('notification-panel');
+    expect(panel).toHaveAttribute('role', 'dialog');
+    expect(panel).toHaveAttribute('aria-modal', 'true');
+
+    const labelledBy = panel.getAttribute('aria-labelledby');
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy as string)).toHaveTextContent('Notifications');
+    expect(panel).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+
+    expect(screen.queryByTestId('notification-panel')).not.toBeInTheDocument();
+    expect(bellBtn).toHaveFocus();
+  });
+
   test('clicking a notification marks it as read and navigates to the target route', async () => {
     renderTopNavWithProvider(sampleNotifications);
 
@@ -186,6 +339,38 @@ describe('NotificationCenter Component', () => {
     // Unread count should now decrease to 1
     const badge = screen.getByTestId('notification-badge');
     expect(badge).toHaveTextContent('1');
+  });
+
+  test('notification items remain keyboard operable with Enter and Space', async () => {
+    renderTopNavWithProvider(sampleNotifications);
+
+    const bellBtn = screen.getByTestId('notification-bell-btn');
+    await act(async () => {
+      fireEvent.click(bellBtn);
+    });
+
+    const taskItem = screen.getByTestId('notification-item-notif-1');
+    taskItem.focus();
+    expect(taskItem).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.keyDown(taskItem, { key: 'Enter' });
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('/tasks/101');
+
+    mockNavigate.mockClear();
+
+    await act(async () => {
+      fireEvent.click(bellBtn);
+    });
+
+    const paymentItem = screen.getByTestId('notification-item-notif-2');
+    paymentItem.focus();
+
+    await act(async () => {
+      fireEvent.keyDown(paymentItem, { key: ' ' });
+    });
+    expect(mockNavigate).toHaveBeenCalledWith('/wallet');
   });
 
   test('"Mark all as read" button marks all notifications as read and updates badge', async () => {
@@ -262,6 +447,7 @@ describe('NotificationCenter Component', () => {
       fireEvent.mouseDown(document.body);
     });
     expect(screen.queryByTestId('notification-panel')).not.toBeInTheDocument();
+    expect(bellBtn).toHaveFocus();
   });
 
   test('persists notifications and read/unread state in localStorage', async () => {

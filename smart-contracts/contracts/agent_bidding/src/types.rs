@@ -346,3 +346,36 @@ pub struct RefundClaimedEvent {
     pub bidder: Address,
     pub bond: i128,
 }
+
+/// Emitted when `claim_bond_refund` successfully refunds a bidder's bond.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondRefundClaimedEvent {
+    pub task_id: Symbol,
+    pub bidder: Address,
+    pub bond: i128,
+}
+
+/// Emitted when a bid exceeds the auction max budget cap.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BidRejectedOverBudgetEvent {
+    pub version: u32,
+    pub task_id: Symbol,
+    pub bidder: Address,
+    pub bid_amount: i128,
+    pub max_budget: i128,
+    pub ledger: u32,
+}
+
+/// Emitted when a bid is below the auction reserve price.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BidRejectedBelowReserveEvent {
+    pub version: u32,
+    pub task_id: Symbol,
+    pub bidder: Address,
+    pub bid_amount: i128,
+    pub reserve_price: i128,
+    pub ledger: u32,
+}

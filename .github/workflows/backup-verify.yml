@@ -1,0 +1,79 @@
+name: Backup Verification
+
+on:
+  schedule:
+    - cron: '30 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/scripts/backup-databases.sh'
+      - '.github/workflows/backup-verify.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify-synthetic-backups:
+    name: Verify isolated SQLite backups
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install SQLite
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sqlite3
+
+      - name: Create isolated fixture databases
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/backup-source"
+          for database in payments agents tasks; do
+            sqlite3 "$RUNNER_TEMP/backup-source/${database}.db" <<'SQL'
+          CREATE TABLE fixture_records (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+          WITH RECURSIVE records(id) AS (
+            SELECT 1 UNION ALL SELECT id + 1 FROM records WHERE id < 100
+          )
+          INSERT INTO fixture_records SELECT id, printf('fixture-%03d', id) FROM records;
+          SQL
+          done
+
+      - name: Create, restore, and verify backups
+        env:
+          DB_DIR: ${{ runner.temp }}/backup-source
+          BACKUP_TIMESTAMP_FILE: ${{ runner.temp }}/backup-source/.last-backup-timestamp
+        run: |
+          set -euo pipefail
+          ./backend/scripts/backup-databases.sh \
+            --local --integrity-check \
+            --output-dir "$RUNNER_TEMP/verified-backups"
+          test -s "$RUNNER_TEMP/verified-backups/manifest.json"
+          test -s "$BACKUP_TIMESTAMP_FILE"
+          for database in payments agents tasks; do
+            test -s "$RUNNER_TEMP/verified-backups/"*-"${database}.db.gz"
+          done
+
+      - name: Configure isolated test-bucket credentials
+        if: github.event_name == 'schedule' && vars.BACKUP_VERIFY_AWS_ROLE_ARN != '' && vars.BACKUP_VERIFY_TEST_BUCKET != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.BACKUP_VERIFY_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload verified fixtures to isolated test bucket
+        if: github.event_name == 'schedule' && vars.BACKUP_VERIFY_AWS_ROLE_ARN != '' && vars.BACKUP_VERIFY_TEST_BUCKET != ''
+        env:
+          TEST_BUCKET: ${{ vars.BACKUP_VERIFY_TEST_BUCKET }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "$RUNNER_TEMP/verified-backups/" \
+            "s3://${TEST_BUCKET}/backup-verification/${RUN_ID}/" \
+            --recursive --sse AES256
+
+      - name: Report skipped test-bucket upload
+        if: github.event_name == 'schedule' && (vars.BACKUP_VERIFY_AWS_ROLE_ARN == '' || vars.BACKUP_VERIFY_TEST_BUCKET == '')
+        run: echo 'S3 upload skipped: configure BACKUP_VERIFY_AWS_ROLE_ARN and BACKUP_VERIFY_TEST_BUCKET for the isolated test bucket.'

@@ -1,0 +1,6 @@
+hosted_zone_id              = "Z0123456789EXAMPLE"
+record_name                 = "api.example.com"
+primary_endpoint_dns        = "primary-alb-123.us-east-1.elb.amazonaws.com"
+standby_endpoint_dns        = "standby-alb-456.us-west-2.elb.amazonaws.com"
+primary_backup_bucket_name  = "replace-with-globally-unique-primary-backups"
+standby_backup_bucket_name  = "replace-with-globally-unique-standby-backups"

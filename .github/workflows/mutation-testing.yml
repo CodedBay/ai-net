@@ -1,0 +1,299 @@
+name: Mutation Testing (weekly)
+
+# Runs weekly on Sunday at 02:00 UTC.
+# Trigger manually with optional `target` input (backend|frontend|contracts|all).
+# Results are uploaded as artifacts and summarised in the job summary.
+# Does NOT block PRs — mutation testing is a quality signal, not a gate.
+#
+# Mutation score target: >= 70%
+# Focus: StellarService (backend/src/payment), PipelineOrchestrator
+#        (backend/src/coordinator), all contract functions (agent_registry)
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which target to mutate (backend|frontend|contracts|all)'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Backend: Stryker + Jest ────────────────────────────────────────────────
+  mutation-backend:
+    name: Backend mutation (Stryker/Jest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == 'backend'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Stryker (pinned)
+        run: |
+          npm install --no-save \
+            @stryker-mutator/core@8.7.1 \
+            @stryker-mutator/jest-runner@8.7.1
+
+      - name: Run Stryker mutation tests
+        run: npx stryker run
+        continue-on-error: true
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report-backend-${{ github.run_id }}
+          path: backend/reports/mutation/backend/
+          retention-days: 30
+
+      - name: Summarise surviving mutants for human review
+        if: always()
+        run: |
+          echo '### Backend Mutation Report' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          REPORT="reports/mutation/backend/report.json"
+          if [ -f "$REPORT" ]; then
+            node -e "
+              const r = require('./$REPORT');
+              const files = r.files || {};
+              let survived = 0, killed = 0, total = 0;
+              for (const f of Object.values(files)) {
+                for (const m of (f.mutants || [])) {
+                  total++;
+                  if (m.status === 'Survived') survived++;
+                  if (m.status === 'Killed') killed++;
+                }
+              }
+              const score = total > 0 ? ((killed / total) * 100).toFixed(1) : 'N/A';
+              const icon = parseFloat(score) >= 70 ? '✅' : '❌';
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| ' + icon + ' Mutation score | **' + score + '%** (target ≥ 70%) |');
+              console.log('| Killed | ' + killed + ' |');
+              console.log('| Survived | ' + survived + ' |');
+              console.log('| Total | ' + total + ' |');
+              if (survived > 0) {
+                console.log('');
+                console.log('#### Surviving mutants — human review required');
+                console.log('');
+                let shown = 0;
+                for (const [file, fdata] of Object.entries(files)) {
+                  for (const m of (fdata.mutants || [])) {
+                    if (m.status === 'Survived' && shown < 20) {
+                      const line = m.location && m.location.start ? m.location.start.line : '?';
+                      const repl = String(m.replacement || '').slice(0, 100);
+                      console.log('- \`' + file + '\` L' + line + ' **' + m.mutatorName + '**: \`' + repl + '\`');
+                      shown++;
+                    }
+                  }
+                }
+                if (survived > 20) console.log('_… and ' + (survived - 20) + ' more. See the full report artifact._');
+              }
+            " >> "$GITHUB_STEP_SUMMARY" || echo 'Failed to parse report' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '_No report generated — check the job log._' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ── Frontend: Stryker + Vitest ────────────────────────────────────────────
+  mutation-frontend:
+    name: Frontend mutation (Stryker/Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == 'frontend'
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Stryker (pinned)
+        run: |
+          npm install --no-save \
+            @stryker-mutator/core@8.7.1 \
+            @stryker-mutator/vitest-runner@8.7.1
+
+      - name: Run Stryker mutation tests
+        run: npx stryker run
+        continue-on-error: true
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report-frontend-${{ github.run_id }}
+          path: frontend/reports/mutation/frontend/
+          retention-days: 30
+
+      - name: Summarise surviving mutants for human review
+        if: always()
+        run: |
+          echo '### Frontend Mutation Report' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          REPORT="reports/mutation/frontend/report.json"
+          if [ -f "$REPORT" ]; then
+            node -e "
+              const r = require('./$REPORT');
+              const files = r.files || {};
+              let survived = 0, killed = 0, total = 0;
+              for (const f of Object.values(files)) {
+                for (const m of (f.mutants || [])) {
+                  total++;
+                  if (m.status === 'Survived') survived++;
+                  if (m.status === 'Killed') killed++;
+                }
+              }
+              const score = total > 0 ? ((killed / total) * 100).toFixed(1) : 'N/A';
+              const icon = parseFloat(score) >= 70 ? '✅' : '❌';
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| ' + icon + ' Mutation score | **' + score + '%** (target ≥ 70%) |');
+              console.log('| Killed | ' + killed + ' |');
+              console.log('| Survived | ' + survived + ' |');
+              console.log('| Total | ' + total + ' |');
+              if (survived > 0) {
+                console.log('');
+                console.log('#### Surviving mutants — human review required');
+                console.log('');
+                let shown = 0;
+                for (const [file, fdata] of Object.entries(files)) {
+                  for (const m of (fdata.mutants || [])) {
+                    if (m.status === 'Survived' && shown < 20) {
+                      const line = m.location && m.location.start ? m.location.start.line : '?';
+                      const repl = String(m.replacement || '').slice(0, 100);
+                      console.log('- \`' + file + '\` L' + line + ' **' + m.mutatorName + '**: \`' + repl + '\`');
+                      shown++;
+                    }
+                  }
+                }
+                if (survived > 20) console.log('_… and ' + (survived - 20) + ' more. See the full report artifact._');
+              }
+            " >> "$GITHUB_STEP_SUMMARY" || echo 'Failed to parse report' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '_No report generated — check the job log._' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ── Smart contracts: cargo-mutants ───────────────────────────────────────
+  mutation-contracts:
+    name: Contracts mutation (cargo-mutants)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == 'contracts'
+    env:
+      CARGO_BUILD_JOBS: '2'
+      RUSTFLAGS: '-C codegen-units=1'
+      CARGO_INCREMENTAL: '0'
+    defaults:
+      run:
+        working-directory: smart-contracts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts
+
+      - name: Install cargo-mutants (pinned)
+        run: cargo install cargo-mutants --locked --version 24.11.2
+
+      - name: Run cargo-mutants on agent_registry
+        run: |
+          mkdir -p mutants-output
+          cargo mutants \
+            --package agent_registry \
+            --timeout 120 \
+            --jobs 2 \
+            --output mutants-output \
+            -- --locked 2>&1 | tee mutants-output/run.log || true
+
+      - name: Upload cargo-mutants report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report-contracts-${{ github.run_id }}
+          path: smart-contracts/mutants-output/
+          retention-days: 30
+
+      - name: Summarise surviving mutants for human review
+        if: always()
+        run: |
+          echo '### Contracts Mutation Report (cargo-mutants)' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+
+          # Try outcomes.json first (cargo-mutants ≥ 0.5 emits this)
+          if [ -f mutants-output/outcomes.json ]; then
+            node -e "
+              const outcomes = require('./mutants-output/outcomes.json');
+              const total = outcomes.length;
+              const caught = outcomes.filter(o => o.summary === 'caught').length;
+              const missed = outcomes.filter(o => o.summary === 'missed').length;
+              const unviable = outcomes.filter(o => o.summary === 'unviable').length;
+              const score = total > 0 ? ((caught / total) * 100).toFixed(1) : 'N/A';
+              const icon = parseFloat(score) >= 70 ? '✅' : '❌';
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| ' + icon + ' Mutation score | **' + score + '%** (target ≥ 70%) |');
+              console.log('| Caught | ' + caught + ' |');
+              console.log('| Missed | ' + missed + ' |');
+              console.log('| Unviable | ' + unviable + ' |');
+              console.log('| Total | ' + total + ' |');
+              if (missed > 0) {
+                console.log('');
+                console.log('#### Missed mutants — human review required');
+                console.log('');
+                outcomes.filter(o => o.summary === 'missed').slice(0, 20).forEach(m => {
+                  const loc = (m.file || '') + ':' + (m.line || '');
+                  const diff = String(m.diff || m.genre || '').slice(0, 120).replace(/\n/g, ' ');
+                  console.log('- \`' + loc + '\` **' + (m.genre || m.function || '') + '**: ' + diff);
+                });
+              }
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          elif [ -f mutants-output/run.log ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            tail -80 mutants-output/run.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '_No report generated — check the job log._' >> "$GITHUB_STEP_SUMMARY"
+          fi

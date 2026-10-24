@@ -18,6 +18,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   changes:
@@ -29,11 +30,11 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Detect changed paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             backend:
@@ -41,9 +42,19 @@ jobs:
               - 'tests/e2e/**'
               - 'smart-contracts/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release-please.yml'
+              - '.release-please-*.json'
+              - '.versionrc.json'
+              - 'package.json'
+              - 'package-lock.json'
             frontend:
               - 'frontend/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release-please.yml'
+              - '.release-please-*.json'
+              - '.versionrc.json'
+              - 'package.json'
+              - 'package-lock.json'
 
   backend:
     name: backend
@@ -54,10 +65,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -73,7 +84,25 @@ jobs:
         run: npm run build
 
       - name: Unit tests & coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --json --outputFile=test-results-unit.json
+
+      - name: Upload backend unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-backend-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend/test-results-unit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Performance latency budgets
         run: npm run test:performance
@@ -87,10 +116,10 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -106,25 +135,31 @@ jobs:
         run: npm run build
 
       - name: Unit tests & coverage (vitest)
-        run: npm run test:coverage
+        run: npm run test:coverage -- --reporter=json --outputFile=test-results-unit.json
 
-  frontend-visual:
-    name: frontend-visual-regression
-    # Deliberately does NOT `needs: [frontend]`. This suite renders four
-    # specific routes through `vite dev` (an on-demand, per-module dev
-    # server), not the full production bundle `frontend`'s `npm run build`
-    # type-checks — so it doesn't need that job to pass, and shouldn't be
-    # blocked by an unrelated tsc error in a page these tests don't visit.
-    # Screenshot comparisons are inherently more environment-sensitive than
-    # unit/type checks; don't block merges on this suite yet. Failures are
-    # still visible on the PR checks list and via the uploaded report.
-    continue-on-error: true
+      - name: Upload frontend unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-frontend-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frontend/test-results-unit.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          if-no-files-found: warn
+          retention-days: 14
+
+  frontend-accessibility:
+    name: frontend-accessibility (axe-core WCAG AA)
+    needs: [frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Pinned to the @playwright/test version resolved in package-lock.json.
-    # Visual baselines are pixel-tied to this image's fonts/rendering stack —
-    # bump this tag in lockstep whenever @playwright/test is upgraded, and
-    # regenerate baselines from the same image (see docs/visual-regression-testing.md).
     container:
       image: mcr.microsoft.com/playwright:v1.61.0-jammy
     env:
@@ -139,12 +174,61 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run accessibility tests (axe WCAG AA)
+        run: npx playwright test tests/e2e/accessibility.spec.ts --reporter=html
+        env:
+          CI: "true"
+
+      - name: Upload accessibility HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-accessibility-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+      - name: Summarise violations in job summary
+        if: failure()
+        run: |
+          {
+            echo "### ♿ Accessibility violations detected";
+            echo "WCAG AA violations were found. Open the **playwright-accessibility-report** artifact and load \`index.html\` to review failing tests.";
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-visual:
+    name: frontend-visual-regression
+    # Deliberately does NOT `needs: [frontend]`. This suite renders four
+    # specific routes through `vite dev` (an on-demand, per-module dev
+    # server), not the full production bundle `frontend`'s `npm run build`
+    # type-checks — so it doesn't need that job to pass, and shouldn't be
+    # blocked by an unrelated tsc error in a page these tests don't visit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Pinned to the @playwright/test version resolved in package-lock.json.
+    # Visual baselines are pixel-tied to this image's fonts/rendering stack —
+    # bump this tag in lockstep whenever @playwright/test is upgraded, and
+    # regenerate baselines from the same image (see docs/visual-regression-testing.md).
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-jammy
+    env:
+      TZ: UTC
+      PERCY_TOKEN: ${{ secrets.PERCY_TOKEN }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Run visual regression tests
         run: npm run test:visual
 
       - name: Upload visual regression report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-visual-report
           path: frontend/playwright-report-visual/
@@ -182,10 +266,10 @@ jobs:
         working-directory: smart-contracts
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -222,12 +306,12 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Cargo clippy
-        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding --all-targets -- -D warnings
+        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding -p payment_escrow --all-targets -- -D warnings
 
       # `--locked` keeps CI on the workspace lockfile resolution, which pins
       # ed25519-dalek to a version compatible with current stable Rust.
       - name: Cargo tests
-        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding
+        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding -p payment_escrow
 
       # Optimized Wasm builds for the deployable contracts.
       # (error-resolver is exercised natively above; its Wasm target is
@@ -256,10 +340,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -269,7 +353,7 @@ jobs:
         run: npm ci
 
       - name: Run backend smoke E2E (with auto-retry)
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 12
           max_attempts: 3
@@ -283,7 +367,7 @@ jobs:
 
       - name: Upload backend smoke results (flake tracking)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-backend-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -307,10 +391,10 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -320,7 +404,7 @@ jobs:
         run: npm ci
 
       - name: Run backend heavy E2E (with auto-retry)
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 18
           max_attempts: 3
@@ -334,7 +418,7 @@ jobs:
 
       - name: Upload backend heavy results (flake tracking)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-backend-heavy-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -358,10 +442,10 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -374,7 +458,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run frontend smoke E2E (with auto-retry)
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 15
           max_attempts: 3
@@ -385,7 +469,7 @@ jobs:
 
       - name: Upload frontend smoke Playwright report (flake tracking)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-frontend-smoke-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -409,10 +493,10 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -425,7 +509,7 @@ jobs:
         run: npx playwright install --with-deps chromium firefox
 
       - name: Run frontend heavy E2E (with auto-retry)
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 15
           max_attempts: 3
@@ -436,7 +520,7 @@ jobs:
 
       - name: Upload frontend heavy Playwright report (flake tracking)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-frontend-heavy-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -503,10 +587,10 @@ jobs:
         working-directory: smart-contracts
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -524,3 +608,101 @@ jobs:
       - name: Skip notice
         if: env.STELLAR_COORDINATOR_SECRET == '' || env.VENICE_API_KEY == ''
         run: echo "Integration secrets not configured — skipping integration tests."
+
+  # ── Flaky test detection (scheduled / manual) ────────────────────────────────
+  # Runs each test suite 5 times and reports tests that don't pass consistently.
+  # Only runs on main pushes and manual triggers to avoid slowing down PRs.
+  # Issue: #95
+  flaky-test-detection:
+    name: flaky-test-detection
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run flaky detection — backend (5 runs)
+        id: flaky_backend
+        continue-on-error: true
+        run: node scripts/detect-flaky-tests.js --suite backend --runs 5 --json /tmp/flaky-backend.json
+        env:
+          NODE_ENV: test
+
+      - name: Run flaky detection — frontend (5 runs)
+        id: flaky_frontend
+        continue-on-error: true
+        run: node scripts/detect-flaky-tests.js --suite frontend --runs 5 --json /tmp/flaky-frontend.json
+        env:
+          NODE_ENV: test
+
+      - name: Upload flaky test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-test-reports-${{ github.run_id }}
+          path: |
+            /tmp/flaky-backend.json
+            /tmp/flaky-frontend.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Auto-create issue for newly detected flaky tests
+        if: steps.flaky_backend.outcome == 'failure' || steps.flaky_frontend.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            let body = '## 🔴 Flaky Tests Detected\n\n';
+            body += `**Workflow run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
+            body += `**Branch:** \`${{ github.ref_name }}\`\n`;
+            body += `**Commit:** \`${{ github.sha }}\`\n\n`;
+
+            for (const [label, file] of [['Backend', '/tmp/flaky-backend.json'], ['Frontend', '/tmp/flaky-frontend.json']]) {
+              if (!fs.existsSync(file)) continue;
+              const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+              if (data.flaky.length === 0) continue;
+
+              body += `### ${label} flaky tests (${data.flaky.length})\n\n`;
+              body += '| Test | Failure rate | File |\n';
+              body += '|------|-------------|------|\n';
+              for (const t of data.flaky) {
+                const rate = ((t.failures / data.runs) * 100).toFixed(0);
+                body += `| \`${t.name}\` | ${rate}% | \`${t.file}\` |\n`;
+              }
+              body += '\n';
+            }
+
+            body += '### Next steps\n\n';
+            body += '1. Add `// FLAKY: <reason>` comment to each listed test.\n';
+            body += '2. Investigate the root cause (timing, network, shared state).\n';
+            body += '3. Fix or quarantine until fixed.\n';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 Flaky tests detected in CI run #${{ github.run_number }}`,
+              body,
+              labels: ['flaky-test', 'ci', 'bug'],
+            });

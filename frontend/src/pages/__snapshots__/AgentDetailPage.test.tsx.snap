@@ -1,0 +1,756 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AgentDetailPage > renders 404 empty state when notFound=true 1`] = `
+<div>
+  <div
+    class="_page_0b2b55"
+    data-testid="agent-not-found"
+  >
+    <div
+      class="_container_74c43e"
+      data-testid="empty-state"
+    >
+      <h3
+        class="_title_74c43e"
+      >
+        Agent not found
+      </h3>
+      <div
+        class="_description_74c43e"
+      >
+        <p>
+          No agent with this ID exists in the registry.
+        </p>
+      </div>
+      <div
+        class="_actions_74c43e"
+      >
+        <button
+          class="_primaryBtn_74c43e"
+          data-testid="empty-state-primary-cta"
+          type="button"
+        >
+          <span>
+            Browse Registry
+          </span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AgentDetailPage > renders error state with browse registry link 1`] = `
+<div>
+  <div
+    class="_page_0b2b55"
+    data-testid="agent-error"
+  >
+    <div
+      class="_errorBox_0b2b55"
+      role="alert"
+    >
+      <p>
+        Failed to load agent
+      </p>
+      <a
+        class="_backLink_0b2b55"
+        href="/agents"
+      >
+        ← 
+        Browse Registry
+      </a>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AgentDetailPage > renders fully loaded agent with all sections 1`] = `
+<div>
+  <div
+    class="_page_0b2b55"
+    data-testid="agent-detail-page"
+  >
+    <nav
+      aria-label="Breadcrumb"
+      class="_breadcrumb_0b2b55"
+    >
+      <a
+        class="_backLink_0b2b55"
+        href="/agents"
+      >
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-arrow-left"
+          fill="none"
+          height="16"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 19-7-7 7-7"
+          />
+          <path
+            d="M19 12H5"
+          />
+        </svg>
+        Agent Registry
+      </a>
+    </nav>
+    <div
+      class="_header_0b2b55"
+      data-testid="agent-header"
+    >
+      <div
+        aria-hidden="true"
+        class="_avatar_0b2b55"
+        style="background: rgb(40, 97, 189);"
+      >
+        <svg
+          class="lucide lucide-zap"
+          fill="none"
+          height="28"
+          stroke="#fff"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="28"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"
+          />
+        </svg>
+      </div>
+      <div
+        class="_headerInfo_0b2b55"
+      >
+        <h1
+          class="_agentName_0b2b55"
+        >
+          Solar Research Agent
+        </h1>
+        <div
+          class="_addressRow_0b2b55"
+        >
+          <code
+            class="_address_0b2b55"
+            data-testid="agent-address"
+            title="GAGENT123456789"
+          >
+            GAGENT123456789
+          </code>
+          <button
+            class="copy-btn "
+            data-testid="copy-button"
+            style="display: inline-flex; align-items: center; gap: 6px; background: var(--surface-hover); border: 1px solid var(--border-muted); color: var(--text-primary); padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: all 0.2s ease; outline: none; user-select: none;"
+            title="Copy to clipboard"
+            type="button"
+          >
+            <svg
+              class="lucide lucide-copy"
+              fill="none"
+              height="13"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="13"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                height="14"
+                rx="2"
+                ry="2"
+                width="14"
+                x="8"
+                y="8"
+              />
+              <path
+                d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+              />
+            </svg>
+            <span>
+              Copy ID
+            </span>
+          </button>
+          <a
+            aria-label="View on Stellar Explorer"
+            class="_explorerLink_0b2b55"
+            href="https://stellar.expert/explorer/testnet/tx/abc123tx"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <svg
+              aria-hidden="true"
+              class="lucide lucide-external-link"
+              fill="none"
+              height="14"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="14"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M15 3h6v6"
+              />
+              <path
+                d="M10 14 21 3"
+              />
+              <path
+                d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+              />
+            </svg>
+          </a>
+        </div>
+      </div>
+      <span
+        aria-live="polite"
+        class="_statusBadge_0b2b55 _statusOnline_0b2b55"
+        data-testid="agent-status-badge"
+        role="status"
+      >
+        <span
+          aria-hidden="true"
+          class="_statusDot_0b2b55"
+        />
+        <span>
+          Online
+        </span>
+      </span>
+    </div>
+    <section
+      aria-labelledby="capabilities-heading"
+      class="_section_0b2b55"
+      data-testid="capabilities-section"
+    >
+      <h2
+        class="_sectionHeading_0b2b55"
+        id="capabilities-heading"
+      >
+        Capabilities
+      </h2>
+      <div
+        class="_capabilityRow_0b2b55"
+        role="list"
+      >
+        <span
+          class="_capabilityTag_0b2b55"
+          data-testid="capability-research"
+          role="listitem"
+          style="border-color: rgb(59, 130, 246); color: rgb(59, 130, 246);"
+        >
+          research
+        </span>
+        <span
+          class="_capabilityTag_0b2b55"
+          data-testid="capability-risk"
+          role="listitem"
+          style="border-color: rgb(245, 158, 11); color: rgb(245, 158, 11);"
+        >
+          risk
+        </span>
+      </div>
+    </section>
+    <div
+      class="_twoCol_0b2b55"
+    >
+      <section
+        aria-labelledby="pricing-heading"
+        class="_pricingCard_0b2b55"
+        data-testid="pricing-section"
+      >
+        <h2
+          class="_cardHeading_0b2b55"
+          id="pricing-heading"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-dollar-sign"
+            fill="none"
+            height="16"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="16"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <line
+              x1="12"
+              x2="12"
+              y1="2"
+              y2="22"
+            />
+            <path
+              d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"
+            />
+          </svg>
+          Pricing
+        </h2>
+        <div
+          class="_priceMain_0b2b55"
+        >
+          <span
+            class="_priceValue_0b2b55"
+            data-testid="agent-price"
+          >
+            1.50
+          </span>
+          <span
+            class="_priceUnit_0b2b55"
+          >
+            XLM
+          </span>
+          <span
+            class="_priceLabel_0b2b55"
+          >
+            per task
+          </span>
+        </div>
+      </section>
+      <section
+        aria-labelledby="reputation-heading"
+        class="_reputationCard_0b2b55"
+        data-testid="reputation-section"
+      >
+        <h2
+          class="_cardHeading_0b2b55"
+          id="reputation-heading"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-star"
+            fill="none"
+            height="16"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="16"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"
+            />
+          </svg>
+          Reputation
+        </h2>
+        <div
+          class="_gaugeWrapper_0b2b55"
+        >
+          <div
+            aria-label="Reputation score: 84 out of 100"
+            class="_gauge_0b2b55"
+          >
+            <svg
+              aria-hidden="true"
+              height="80"
+              viewBox="0 0 80 80"
+              width="80"
+            >
+              <circle
+                cx="40"
+                cy="40"
+                fill="none"
+                r="36"
+                stroke="var(--border-color,#334155)"
+                stroke-width="6"
+              />
+              <circle
+                cx="40"
+                cy="40"
+                fill="none"
+                r="36"
+                stroke="#10b981"
+                stroke-dasharray="226.1946710584651"
+                stroke-dashoffset="36.19114736935441"
+                stroke-linecap="round"
+                stroke-width="6"
+                transform="rotate(-90 40 40)"
+              />
+            </svg>
+            <span
+              class="_gaugeLabel_0b2b55"
+            >
+              84
+            </span>
+          </div>
+        </div>
+        <dl
+          class="_dimensionGrid_0b2b55"
+        >
+          <div
+            class="_dimension_0b2b55"
+          >
+            <dt
+              class="_dimensionLabel_0b2b55"
+            >
+              quality
+            </dt>
+            <dd
+              class="_dimensionBar_0b2b55"
+            >
+              <div
+                aria-label="quality: 90%"
+                class="_dimensionFill_0b2b55"
+                role="img"
+                style="width: 90%;"
+              />
+            </dd>
+          </div>
+          <div
+            class="_dimension_0b2b55"
+          >
+            <dt
+              class="_dimensionLabel_0b2b55"
+            >
+              speed
+            </dt>
+            <dd
+              class="_dimensionBar_0b2b55"
+            >
+              <div
+                aria-label="speed: 70%"
+                class="_dimensionFill_0b2b55"
+                role="img"
+                style="width: 70%;"
+              />
+            </dd>
+          </div>
+          <div
+            class="_dimension_0b2b55"
+          >
+            <dt
+              class="_dimensionLabel_0b2b55"
+            >
+              reliability
+            </dt>
+            <dd
+              class="_dimensionBar_0b2b55"
+            >
+              <div
+                aria-label="reliability: 85%"
+                class="_dimensionFill_0b2b55"
+                role="img"
+                style="width: 85%;"
+              />
+            </dd>
+          </div>
+          <div
+            class="_dimension_0b2b55"
+          >
+            <dt
+              class="_dimensionLabel_0b2b55"
+            >
+              cost
+            </dt>
+            <dd
+              class="_dimensionBar_0b2b55"
+            >
+              <div
+                aria-label="cost: 60%"
+                class="_dimensionFill_0b2b55"
+                role="img"
+                style="width: 60%;"
+              />
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </div>
+    <section
+      aria-labelledby="history-heading"
+      class="_section_0b2b55"
+      data-testid="task-history-section"
+    >
+      <h2
+        class="_sectionHeading_0b2b55"
+        id="history-heading"
+      >
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-activity"
+          fill="none"
+          height="16"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+          />
+        </svg>
+        Recent Task History
+      </h2>
+      <p
+        class="_emptyText_0b2b55"
+        data-testid="task-history-placeholder"
+      >
+        Task history will appear here once this agent has completed tasks.
+      </p>
+    </section>
+    <div
+      class="_ctaRow_0b2b55"
+      data-testid="hire-cta"
+    >
+      <button
+        aria-disabled="false"
+        class="_hireButton_0b2b55"
+        data-testid="hire-agent-btn"
+        type="button"
+      >
+        Hire this Agent
+      </button>
+      <a
+        class="_browseLink_0b2b55"
+        data-testid="browse-registry-link"
+        href="/agents"
+      >
+        Browse Registry
+      </a>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AgentDetailPage > renders loading skeletons when agentLoading=true 1`] = `
+<div>
+  <div
+    class="_page_0b2b55"
+    data-testid="agent-detail-page"
+  >
+    <nav
+      aria-label="Breadcrumb"
+      class="_breadcrumb_0b2b55"
+    >
+      <a
+        class="_backLink_0b2b55"
+        href="/agents"
+      >
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-arrow-left"
+          fill="none"
+          height="16"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="m12 19-7-7 7-7"
+          />
+          <path
+            d="M19 12H5"
+          />
+        </svg>
+        Agent Registry
+      </a>
+    </nav>
+    <div
+      aria-hidden="true"
+      class="_header_0b2b55"
+      data-testid="header-skeleton"
+    >
+      <div
+        aria-hidden="true"
+        class="_skeleton_aa2e65 _circular_aa2e65"
+        style="width: 64px; height: 64px;"
+      />
+      <div
+        class="_headerInfo_0b2b55"
+      >
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 14rem; height: 1.75rem; margin-bottom: 0.5rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 20rem; height: 1rem;"
+        />
+      </div>
+      <div
+        aria-hidden="true"
+        class="_skeleton_aa2e65 _pill_aa2e65"
+        style="width: 5.5rem; height: 2rem;"
+      />
+    </div>
+    <div
+      aria-hidden="true"
+      class="_section_0b2b55"
+      data-testid="capabilities-skeleton"
+    >
+      <div
+        aria-hidden="true"
+        class="_skeleton_aa2e65 _text_aa2e65"
+        style="width: 8rem; height: 0.875rem; margin-bottom: 0.75rem;"
+      />
+      <div
+        class="_capabilityRow_0b2b55"
+      >
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _pill_aa2e65"
+          style="width: 5rem; height: 1.75rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _pill_aa2e65"
+          style="width: 4rem; height: 1.75rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _pill_aa2e65"
+          style="width: 6rem; height: 1.75rem;"
+        />
+      </div>
+    </div>
+    <div
+      class="_twoCol_0b2b55"
+    >
+      <div
+        class="_card_aa2e65 _pricingCard_0b2b55"
+        data-testid="pricing-skeleton"
+      >
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 6rem; height: 0.875rem; margin-bottom: 0.75rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 8rem; height: 2.5rem; margin-bottom: 0.5rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 10rem; height: 0.75rem;"
+        />
+      </div>
+      <div
+        class="_card_aa2e65 _reputationCard_0b2b55"
+        data-testid="reputation-skeleton"
+      >
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          style="width: 7rem; height: 0.875rem; margin-bottom: 0.75rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _circular_aa2e65"
+          style="width: 80px; height: 80px; margin: 0px auto 1rem;"
+        />
+        <div
+          class="_textLines_aa2e65"
+        >
+          <div
+            aria-hidden="true"
+            class="_skeleton_aa2e65 _text_aa2e65"
+            data-testid="skeleton-text-line"
+            style="width: 100%; height: 1rem;"
+          />
+          <div
+            aria-hidden="true"
+            class="_skeleton_aa2e65 _text_aa2e65"
+            data-testid="skeleton-text-line"
+            style="width: 100%; height: 1rem;"
+          />
+          <div
+            aria-hidden="true"
+            class="_skeleton_aa2e65 _text_aa2e65"
+            data-testid="skeleton-text-line"
+            style="width: 60%; height: 1rem;"
+          />
+        </div>
+      </div>
+    </div>
+    <section
+      aria-labelledby="history-heading"
+      class="_section_0b2b55"
+      data-testid="task-history-section"
+    >
+      <h2
+        class="_sectionHeading_0b2b55"
+        id="history-heading"
+      >
+        <svg
+          aria-hidden="true"
+          class="lucide lucide-activity"
+          fill="none"
+          height="16"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          viewBox="0 0 24 24"
+          width="16"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+          />
+        </svg>
+        Recent Task History
+      </h2>
+      <div
+        class="_textLines_aa2e65"
+      >
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          data-testid="skeleton-text-line"
+          style="width: 100%; height: 1rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          data-testid="skeleton-text-line"
+          style="width: 100%; height: 1rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          data-testid="skeleton-text-line"
+          style="width: 100%; height: 1rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          data-testid="skeleton-text-line"
+          style="width: 100%; height: 1rem;"
+        />
+        <div
+          aria-hidden="true"
+          class="_skeleton_aa2e65 _text_aa2e65"
+          data-testid="skeleton-text-line"
+          style="width: 60%; height: 1rem;"
+        />
+      </div>
+    </section>
+  </div>
+</div>
+`;

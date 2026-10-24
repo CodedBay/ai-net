@@ -12,7 +12,14 @@ export interface EmptyStateAction {
 export interface EmptyStateProps {
   title: string;
   description?: React.ReactNode;
+  /** Small icon shown in the icon wrapper (legacy usage). */
   icon?: React.ReactNode;
+  /**
+   * Full illustrated SVG placed above the title.
+   * When provided the illustration replaces the small icon wrapper.
+   * Use the pre-built components from `./illustrations/`.
+   */
+  illustration?: React.ReactNode;
   primaryAction?: EmptyStateAction;
   secondaryAction?: EmptyStateAction;
   variant?: 'default' | 'card' | 'compact';
@@ -24,6 +31,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   description,
   icon,
+  illustration,
   primaryAction,
   secondaryAction,
   variant = 'default',
@@ -63,7 +71,13 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       className={`${styles.container} ${variantClass} ${className}`.trim()}
       data-testid={dataTestId}
     >
-      {icon && (
+      {illustration && (
+        <div className={styles.illustrationWrapper} aria-hidden="true">
+          {illustration}
+        </div>
+      )}
+
+      {icon && !illustration && (
         <div className={styles.iconWrapper} aria-hidden="true">
           <div className={styles.iconGlow} />
           <div className={styles.iconContent}>{icon}</div>

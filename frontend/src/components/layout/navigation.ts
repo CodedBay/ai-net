@@ -1,4 +1,4 @@
-import { LayoutDashboard, PlusCircle, Bot, Wallet, History } from 'lucide-react'
+import { LayoutDashboard, PlusCircle, Bot, Wallet, History, CreditCard } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -44,7 +44,10 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: 'account',
     labelKey: 'nav.group.account',
-    items: [{ path: '/wallet', labelKey: 'nav.wallet', icon: Wallet }],
+    items: [
+      { path: '/wallet', labelKey: 'nav.wallet', icon: Wallet },
+      { path: '/payments', labelKey: 'nav.payments', icon: CreditCard },
+    ],
   },
 ]
 

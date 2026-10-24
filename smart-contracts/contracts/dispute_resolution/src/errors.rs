@@ -1,41 +1,45 @@
-//! # Error Types for Dispute Resolution
-
 use soroban_sdk::contracterror;
 
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Copy, Eq, PartialEq)]
 #[repr(u32)]
 pub enum Error {
-    NotFound = 1,
-    Unauthorized = 2,
+    /// Contract has not been initialized.
+    NotInitialized = 1,
+    /// Contract is paused.
+    ContractPaused = 2,
+    /// Record already exists.
     AlreadyExists = 3,
-    ContractPaused = 4,
-    DisputeAlreadyResolved = 5,
-    DisputeExpired = 6,
-    JurorAlreadyVoted = 7,
-    NotJuror = 8,
-    InvalidVote = 9,
-    AppealWindowClosed = 10,
-    NoJurorsAvailable = 11,
-    InvalidEvidence = 12,
-}
-
-impl Error {
-    pub fn from_code(code: u32) -> Option<Self> {
-        match code {
-            1 => Some(Error::NotFound),
-            2 => Some(Error::Unauthorized),
-            3 => Some(Error::AlreadyExists),
-            4 => Some(Error::ContractPaused),
-            5 => Some(Error::DisputeAlreadyResolved),
-            6 => Some(Error::DisputeExpired),
-            7 => Some(Error::JurorAlreadyVoted),
-            8 => Some(Error::NotJuror),
-            9 => Some(Error::InvalidVote),
-            10 => Some(Error::AppealWindowClosed),
-            11 => Some(Error::NoJurorsAvailable),
-            12 => Some(Error::InvalidEvidence),
-            _ => None,
-        }
-    }
+    /// Record not found.
+    NotFound = 4,
+    /// Caller is not authorized.
+    Unauthorized = 5,
+    /// Caller is not a configured arbiter.
+    NotArbiter = 6,
+    /// Arbiter has already voted on this dispute.
+    AlreadyVoted = 7,
+    /// Voting period is still active (cannot resolve yet) or has expired (cannot vote).
+    VotingPeriodActive = 8,
+    /// Dispute is already resolved.
+    AlreadyResolved = 9,
+    /// Dispute was raised outside the 24-hour window after task completion.
+    RaisedTooLate = 10,
+    /// No arbiters are configured.
+    NoArbiters = 11,
+    /// Insufficient votes to resolve.
+    InsufficientVotes = 12,
+    /// The arbiter committee must contain five distinct addresses.
+    InvalidArbiterSet = 13,
+    /// No funded escrow exists for the task, or its submitter does not match.
+    InvalidTaskEscrow = 14,
+    /// Escrow amount must be positive.
+    InvalidEscrowAmount = 15,
+    /// Task completion time cannot be in the future.
+    TaskNotCompleted = 16,
+    /// Timestamp or dispute id arithmetic overflowed.
+    ArithmeticOverflow = 17,
+    /// The task already has a dispute.
+    DisputeAlreadyRaised = 18,
+    /// Task funds have already been settled.
+    EscrowAlreadySettled = 19,
 }

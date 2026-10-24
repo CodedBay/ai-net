@@ -65,14 +65,14 @@ describe("AppError", () => {
     it("includes details when includeDetails=true", () => {
       const details = { field: "prompt" };
       const err = new AppError("Validation failed", 400, "VALIDATION_ERROR", details);
-      const payload = err.serialize(true);
+      const payload = err.serialize(undefined, true);
 
       expect(payload.details).toEqual(details);
     });
 
     it("omits details when there are none even with includeDetails=true", () => {
       const err = new AppError("msg", 500, "CODE");
-      const payload = err.serialize(true);
+      const payload = err.serialize(undefined, true);
 
       expect(payload.details).toBeUndefined();
     });
@@ -94,7 +94,7 @@ describe("NotFoundError", () => {
   it("includes the resource id in the message when provided", () => {
     const err = new NotFoundError("Agent", "agent-xyz");
 
-    expect(err.message).toBe("Agent 'agent-xyz' not found");
+    expect(err.message).toBe("Agent not found: agent-xyz");
   });
 
   it("is an instance of AppError", () => {

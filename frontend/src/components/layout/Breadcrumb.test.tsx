@@ -1,12 +1,19 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, test, expect } from 'vitest'
-import Breadcrumb from './Breadcrumb'
+import Breadcrumb, { BreadcrumbContext } from './Breadcrumb'
 
-const renderAt = (path: string) =>
+const renderAt = (path: string, label?: string) =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Breadcrumb />
+      <BreadcrumbContext.Provider
+        value={{
+          pageLabel: label ? { pathname: path, label } : null,
+          setPageLabel: () => undefined,
+        }}
+      >
+        <Breadcrumb />
+      </BreadcrumbContext.Provider>
     </MemoryRouter>,
   )
 
@@ -43,11 +50,9 @@ describe('Breadcrumb', () => {
     expect(screen.getByText('New Task')).toBeInTheDocument()
   })
 
-  test('renders the "/tasks" segment as plain text — there is no page at that path', () => {
+  test('links the task parent to task history', () => {
     renderAt('/tasks/history')
-    const tasks = screen.getByText('Tasks')
-    expect(tasks).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Tasks' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks/history')
   })
 
   test('names a task detail page by its id', () => {
@@ -58,5 +63,25 @@ describe('Breadcrumb', () => {
   test('falls back to a capitalised segment for an unknown route', () => {
     renderAt('/settings')
     expect(screen.getByText('Settings')).toBeInTheDocument()
+  })
+
+  test('uses a page-provided title and truncates it to 30 characters', () => {
+    const title = 'Agent with an exceptionally long display name'
+    renderAt('/agents/agent-id', title)
+    const current = screen.getByText('Agent with an exceptionally l…')
+    expect(current).toHaveAttribute('aria-current', 'page')
+    expect(current).toHaveAttribute('title', title)
+    expect(current.textContent).toHaveLength(30)
+  })
+
+  test('adds a BreadcrumbList JSON-LD script to the document head', () => {
+    renderAt('/tasks/task-123', 'Task task-123')
+    const schema = JSON.parse(document.head.querySelector('#breadcrumb-jsonld')?.textContent ?? '{}')
+    expect(schema['@type']).toBe('BreadcrumbList')
+    expect(schema.itemListElement).toHaveLength(3)
+    expect(schema.itemListElement.at(-1)).toMatchObject({
+      name: 'Task task-123',
+      item: `${window.location.origin}/tasks/task-123`,
+    })
   })
 })

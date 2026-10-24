@@ -11,33 +11,51 @@
   margin-top: 16px;
 }
 
-@media (max-width: 640px) {
+/* Mobile: single column below 768px */
+@media (max-width: 767px) {
   .cardGrid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (min-width: 641px) and (max-width: 960px) {
+/* Tablet: 2 columns through 1024px. */
+@media (min-width: 768px) and (max-width: 1024px) {
   .cardGrid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+}
+
+/* Desktop: three columns alongside the persistent filter sidebar. */
+@media (min-width: 1025px) {
+  .cardGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 /* ── Card skeleton (mirrors AgentRegistryCard layout) ───────────────────────── */
 .cardSkeleton {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 252px;
   padding: 20px;
   border-radius: var(--radius-xl, 16px);
-  border: 1px solid var(--border-color, #e2e8f0);
-  background: var(--surface-glass-subtle, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-color, var(--border-strong));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-primary) 3%, transparent));
 }
 
 .cardSkeletonHeader {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
+}
+
+.cardSkeletonName {
+  flex: 1;
+  min-width: 0;
 }
 
 .cardSkeletonPills {
@@ -51,8 +69,14 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 10px 0;
-  border-top: 1px solid var(--border-color, #e2e8f0);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-top: 1px solid var(--border-color, var(--border-strong));
+  border-bottom: 1px solid var(--border-color, var(--border-strong));
+}
+
+.cardSkeletonMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* ── View toggle ────────────────────────────────────────────────────────────── */
@@ -62,7 +86,7 @@
   gap: 4px;
   padding: 4px;
   border-radius: var(--radius-lg, 10px);
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-color, var(--border-strong));
   background: var(--surface-glass-subtle, transparent);
   flex-shrink: 0;
 }
@@ -76,27 +100,27 @@
   border: none;
   border-radius: var(--radius-md, 8px);
   background: transparent;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .viewToggleBtn:hover {
-  background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.1));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-muted) 10%, transparent));
   color: var(--text-main, var(--text-primary));
 }
 
 .viewToggleBtnActive {
-  background: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--accent, var(--accent-info));
+  color: var(--text-inverse);
 }
 
 .viewToggleBtnActive:hover {
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent-info);
+  color: var(--text-inverse);
 }
 
 .viewToggleBtn:focus-visible {
-  outline: 2px solid var(--accent, #3b82f6);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }

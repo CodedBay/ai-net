@@ -1,4 +1,4 @@
-import { createLogger } from "../utils/logger";
+import { createLogger, runWithLogContext } from "../utils/logger";
 import type { Job, JobStore } from "./jobStore";
 
 const logger = createLogger({ component: "job-worker" });
@@ -165,6 +165,15 @@ export class JobWorker {
   }
 
   private async executeJob(job: Job): Promise<void> {
+    // Establish job-scoped log context so every log in this job's call chain
+    // includes job_id as the correlation ID (Issue #404).
+    await runWithLogContext(
+      { job_id: job.id, taskId: job.taskId, request_id: job.id },
+      () => this._executeJobInContext(job),
+    );
+  }
+
+  private async _executeJobInContext(job: Job): Promise<void> {
     logger.info({ jobId: job.id, taskId: job.taskId, attempt: job.attempts + 1 }, "processing job");
 
     this.onJobStarted?.(job);

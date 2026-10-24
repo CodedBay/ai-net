@@ -1,4 +1,4 @@
-import type { CircuitBreaker } from './circuitBreaker.js';
+import type { VeniceCircuitBreaker } from '../veniceCircuitBreaker.js';
 import type { VeniceResponseCache } from './cache.js';
 import type { RequestDeduplicator } from './dedup.js';
 
@@ -7,6 +7,7 @@ export type AgentType = 'research' | 'risk' | 'coding' | 'design' | 'report';
 export interface CompleteOptions {
   maxTokens?: number;
   temperature?: number;
+  signal?: AbortSignal;
   /** Bypass the response cache (both read and write) when true. */
   force?: boolean;
 }
@@ -39,7 +40,7 @@ export interface VeniceProviderConfig {
 export interface VeniceClientConfig {
   apiKey: string;
   baseUrl?: string;
-  circuitBreaker?: CircuitBreaker;
+  circuitBreaker?: VeniceCircuitBreaker;
   /** Ordered fallback providers; first is primary. When supplied, overrides apiKey/baseUrl. */
   providers?: VeniceProviderConfig[];
   /** Per-call timeout in ms. Default: 10_000. */

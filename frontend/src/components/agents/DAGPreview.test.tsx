@@ -71,18 +71,18 @@ vi.mock("reactflow", () => {
             onClick={(e) => onNodeClick?.(e, node)}
           >
             <span data-testid={`dag-node-label-${node.id}`}>{String(node.data.label ?? "")}</span>
-            {node.data.capability && (
+            {Boolean(node.data.capability) && (
               <span data-testid={`dag-node-cap-${node.id}`}>{String(node.data.capability)}</span>
             )}
             {/* Tooltip rendered when selected */}
             {node.selected && (
               <div data-testid="dag-node-tooltip" role="tooltip">
                 <span data-testid="tooltip-label">{String(node.data.label ?? "")}</span>
-                {node.data.capability && (
+                {Boolean(node.data.capability) && (
                   <span data-testid="tooltip-capability">{String(node.data.capability)}</span>
                 )}
                 {node.data.cost !== undefined && (
-                  <span data-testid="tooltip-cost">{node.data.cost} XLM</span>
+                  <span data-testid="tooltip-cost">{String(node.data.cost)} XLM</span>
                 )}
               </div>
             )}

@@ -73,4 +73,26 @@ describe("structured log redaction", () => {
     expect(raw).not.toContain(stellarSecret);
     expect(raw).toContain("[REDACTED]");
   });
+
+  it("writes the standard NDJSON fields and applies configured redaction paths", () => {
+    const { stream, lines } = collectStream();
+    const logger = createLogger(
+      { traceId: "trace-structured", spanId: "span-structured" },
+      { destination: stream, redactPaths: ["payload.privateNote"] },
+    );
+
+    logger.info({ payload: { privateNote: "internal detail", status: "queued" } }, "task accepted");
+
+    const entry = JSON.parse(lines[0]!.toString()) as Record<string, unknown>;
+    const context = entry.context as Record<string, unknown>;
+    const payload = context.payload as Record<string, unknown>;
+    expect(entry.timestamp).toEqual(expect.any(String));
+    expect(entry.level).toBe("info");
+    expect(entry.traceId).toBe("trace-structured");
+    expect(entry.spanId).toBe("span-structured");
+    expect(entry.service).toBe("ai-net-backend");
+    expect(entry.message).toBe("task accepted");
+    expect(payload.privateNote).toBe("[REDACTED]");
+    expect(payload.status).toBe("queued");
+  });
 });

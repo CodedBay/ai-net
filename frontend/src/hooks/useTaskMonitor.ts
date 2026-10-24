@@ -40,9 +40,9 @@ export const useTaskMonitor = (taskId: string | undefined) => {
     
     // Update task state for global events
     if (event.type === 'task_completed') {
-      setTask(prev => prev ? { ...prev, status: 'completed' } : null);
+      setTask(prev => prev ? { ...prev, status: 'completed', updatedAt: event.timestamp } : null);
     } else if (event.type === 'task_failed') {
-      setTask(prev => prev ? { ...prev, status: 'failed' } : null);
+      setTask(prev => prev ? { ...prev, status: 'failed', updatedAt: event.timestamp } : null);
     }
   }, [nodeState, paymentState, outputState]);
 

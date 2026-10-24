@@ -36,20 +36,20 @@ export function AgentTable({
   const { t } = useTranslation()
 
   const columns: DataTableColumn<AgentRecord>[] = [
-    { key: 'id', header: t('agent.table.agentId'), render: (agent) => <span className={styles.mono} title={agent.id}>{truncateId(agent.id)}</span>, sortable: false },
+    { key: 'id', header: t('agent.table.agentId'), priority: 'primary', render: (agent) => <span className={styles.mono} title={agent.id}>{truncateId(agent.id)}</span>, sortable: false },
+    { key: 'price', header: t('agent.table.price'), priority: 'primary', sortable: true, render: (agent) => <span className={styles.price}>{agent.price.toFixed(2)}</span> },
+    { key: 'reputation', header: t('common.reputation'), priority: 'primary', sortable: true, render: (agent) => <ReputationStars value={agent.reputation} /> },
+    { key: 'status', header: t('common.status'), priority: 'primary', render: (agent) => (
+      <span className={`${styles.status} ${agent.status === 'active' ? styles.statusActive : styles.statusInactive}`}>
+        {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
+      </span>
+    ) },
     { key: 'capabilities', header: t('common.capabilities'), render: (agent) => (
       <span className={styles.pills}>
         {agent.capabilities.length === 0 ? <span className={styles.noPill}>—</span> : agent.capabilities.map((cap) => <span key={cap} className={styles.pill}>{cap}</span>)}
       </span>
     ) },
-    { key: 'price', header: t('agent.table.price'), sortable: true, render: (agent) => <span className={styles.price}>{agent.price.toFixed(2)}</span> },
-    { key: 'reputation', header: t('common.reputation'), sortable: true, render: (agent) => <ReputationStars value={agent.reputation} /> },
-    { key: 'status', header: t('common.status'), render: (agent) => (
-      <span className={`${styles.status} ${agent.status === 'active' ? styles.statusActive : styles.statusInactive}`}>
-        {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
-      </span>
-    ) },
-    { key: 'actions', header: t('agent.table.actions'), render: (agent) => (
+    { key: 'actions', header: t('agent.table.actions'), priority: 'hidden-mobile', render: (agent) => (
       <button type="button" className={styles.detailsButton} onClick={(e) => { e.stopPropagation(); onRowClick(agent) }}>
         {t('common.details')}
       </button>
@@ -83,6 +83,7 @@ export function AgentTable({
           columns={columns}
           rows={agents}
           getRowKey={(agent) => agent.id}
+          mobileView="cards"
           getRowTestId={(agent) => `agent-row-${agent.id}`}
           maxHeight={540}
           stickyHeader

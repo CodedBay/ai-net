@@ -1,0 +1,77 @@
+# monitoring/grafana/provisioning/alerting/contact-points.yml
+#
+# Grafana Alertmanager contact point provisioning.
+# Defines PagerDuty (P1) and Slack (P2/P3) contact points.
+#
+# Security note
+# ─────────────
+# The PagerDuty integration key and Slack webhook URL MUST be injected as
+# environment variables at runtime.  They must NOT be hard-coded here.
+#
+# Environment variables required:
+#   PAGERDUTY_INTEGRATION_KEY   – PagerDuty Events API v2 routing key
+#                                 (stored in AWS Secrets Manager as
+#                                  ai-net/pagerduty-integration-key)
+#   SLACK_WEBHOOK_URL_INCIDENTS – Slack incoming webhook for #incidents
+#   SLACK_WEBHOOK_URL_OPS       – Slack incoming webhook for #ops-alerts
+#
+# These are injected by the docker-compose / ECS task definition.
+
+apiVersion: 1
+
+contactPoints:
+  # ── PagerDuty: P1 incidents ─────────────────────────────────────────────────
+  - orgId: 1
+    name: pagerduty-p1
+    receivers:
+      - uid: pagerduty-p1-receiver
+        type: pagerduty
+        settings:
+          integrationKey: "${PAGERDUTY_INTEGRATION_KEY}"
+          severity: critical
+          # Include a link back to the Grafana dashboard in the PD incident
+          customDetails:
+            grafana_dashboard: "http://grafana:3000/d/ai-net/ai-net-overview"
+            environment: "${DEPLOY_ENV:-production}"
+            service: "ai-net"
+        disableResolveMessage: false
+
+  # ── Slack: P2 incidents (degraded service) ──────────────────────────────────
+  - orgId: 1
+    name: slack-p2-incidents
+    receivers:
+      - uid: slack-p2-receiver
+        type: slack
+        settings:
+          url: "${SLACK_WEBHOOK_URL_INCIDENTS}"
+          recipient: "#incidents"
+          # Template includes all required fields per acceptance criteria
+          text: |
+            :warning: *{{ .CommonLabels.alertname }}*
+            *Severity:* {{ .CommonLabels.severity }}
+            *Service:* {{ .CommonLabels.service }}
+            *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+            *Dashboard:* {{ range .Alerts }}{{ .Annotations.grafana_url }}{{ end }}
+            *Runbook:* {{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}
+          title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+          iconEmoji: ":warning:"
+        disableResolveMessage: false
+
+  # ── Slack: P3 low-urgency ops alerts ────────────────────────────────────────
+  - orgId: 1
+    name: slack-p3-ops
+    receivers:
+      - uid: slack-p3-receiver
+        type: slack
+        settings:
+          url: "${SLACK_WEBHOOK_URL_OPS}"
+          recipient: "#ops-alerts"
+          text: |
+            :information_source: *{{ .CommonLabels.alertname }}*
+            *Severity:* {{ .CommonLabels.severity }}
+            *Service:* {{ .CommonLabels.service }}
+            *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+            *Dashboard:* {{ range .Alerts }}{{ .Annotations.grafana_url }}{{ end }}
+          title: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+          iconEmoji: ":information_source:"
+        disableResolveMessage: true

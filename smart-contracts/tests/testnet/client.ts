@@ -14,6 +14,7 @@
 import { execFile } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import axios from 'axios';
 
 // ── Typed inputs ─────────────────────────────────────────────────────────────
 
@@ -204,4 +205,198 @@ export function loadGasMeasurements(): GasMeasurement[] {
   } catch {
     return [];
   }
+}
+
+// ── Horizon API verification helpers ─────────────────────────────────────────
+//
+// These functions query the Stellar Horizon API to verify that a transaction
+// was recorded on-chain after a payment operation. They are used by E2E
+// payment tests to confirm that the backend state and the Stellar ledger agree.
+
+/** Resolves the Horizon URL from the environment (defaults to testnet). */
+function horizonUrl(): string {
+  return process.env.STELLAR_HORIZON_URL ?? 'https://horizon-testnet.stellar.org';
+}
+
+/** Represents a verified Horizon transaction with its key fields. */
+export interface HorizonTransactionDetails {
+  hash: string;
+  ledger: number;
+  created_at: string;
+  source_account: string;
+  memo_type: string;
+  memo: string | null;
+  operation_count: number;
+  fee_paid: number;
+  successful: boolean;
+}
+
+/** Represents a verified Horizon payment operation. */
+export interface HorizonPaymentDetails {
+  id: string;
+  transaction_hash: string;
+  type: string; // "payment", "create_claimable_balance", "claim_claimable_balance"
+  asset_type: string;
+  amount: string | null;
+  from: string | null;
+  to: string | null;
+  created_at: string;
+}
+
+/**
+ * Fetches a transaction from Horizon by its hash.
+ * Queries GET /transactions/{hash} and returns the decoded transaction details.
+ *
+ * Retries up to 3 times with exponential backoff to allow the transaction
+ * to propagate to Horizon (ledger close time is ~5s on testnet).
+ */
+export async function getTransactionByHash(txHash: string): Promise<HorizonTransactionDetails> {
+  const url = `${horizonUrl()}/transactions/${txHash}`;
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await axios.get(url, { timeout: 30_000 });
+      const tx = response.data;
+      return {
+        hash: tx.hash,
+        ledger: tx.ledger,
+        created_at: tx.created_at,
+        source_account: tx.source_account,
+        memo_type: tx.memo_type,
+        memo: tx.memo,
+        operation_count: tx.operation_count,
+        fee_paid: tx.fee_paid,
+        successful: tx.successful,
+      };
+    } catch (error: any) {
+      lastError = error;
+      if (error?.response?.status === 404 && attempt < 3) {
+        // Transaction not yet in Horizon — wait for ledger close and retry
+        const delay = 5000 * attempt; // 5s, 10s
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Fetches all payment operations for a given transaction hash from Horizon.
+ * Queries GET /transactions/{hash}/payments.
+ */
+export async function getTransactionPayments(txHash: string): Promise<HorizonPaymentDetails[]> {
+  const url = `${horizonUrl()}/transactions/${txHash}/payments`;
+  const response = await axios.get(url, { timeout: 30_000 });
+  const records = response.data?._embedded?.records ?? [];
+  return records.map((record: any) => ({
+    id: record.id,
+    transaction_hash: record.transaction_hash,
+    type: record.type,
+    asset_type: record.asset_type ?? 'native',
+    amount: record.amount ?? null,
+    from: record.from ?? record.source_account ?? null,
+    to: record.to ?? record.destination ?? null,
+    created_at: record.created_at,
+  }));
+}
+
+/**
+ * Verifies a payment transaction on Horizon by checking the transaction hash,
+ * amount, sender, recipient, and memo.
+ *
+ * This is the primary E2E verification function: after a payment is made
+ * via lockEscrow/releasePayment, call this with the returned tx hash to
+ * confirm the on-chain state matches the expected payment parameters.
+ *
+ * @param txHash          The transaction hash returned by the payment function
+ * @param expectedSender  The expected sender account (G... public key)
+ * @param expectedRecipient The expected recipient (G... public key, or null for claimable balance creation)
+ * @param expectedAmount  The expected payment amount in XLM (string, e.g. "5.0000000")
+ * @param expectedMemo    The expected memo text (taskId)
+ * @returns An object with verification results and the Horizon transaction link
+ */
+export async function verifyPaymentOnHorizon(
+  txHash: string,
+  expectedSender: string,
+  expectedRecipient: string | null,
+  expectedAmount: string | null,
+  expectedMemo: string,
+): Promise<{
+  verified: boolean;
+  transaction: HorizonTransactionDetails;
+  payments: HorizonPaymentDetails[];
+  horizonLink: string;
+  details: string[];
+}> {
+  const details: string[] = [];
+
+  // 1. Verify the transaction exists and is successful
+  const tx = await getTransactionByHash(txHash);
+  const horizonLink = `${horizonUrl()}/transactions/${txHash}`;
+  details.push(`Transaction hash: ${tx.hash}`);
+  details.push(`Ledger: ${tx.ledger}`);
+  details.push(`Successful: ${tx.successful}`);
+  details.push(`Horizon link: ${horizonLink}`);
+
+  if (!tx.successful) {
+    details.push(`❌ Transaction ${txHash} was not successful on Horizon`);
+    return { verified: false, transaction: tx, payments: [], horizonLink, details };
+  }
+
+  // 2. Verify the memo
+  if (tx.memo_type === 'text' && tx.memo !== null) {
+    details.push(`Memo: ${tx.memo} (expected: ${expectedMemo})`);
+    if (tx.memo !== expectedMemo) {
+      details.push(`❌ Memo mismatch: got "${tx.memo}", expected "${expectedMemo}"`);
+      return { verified: false, transaction: tx, payments: [], horizonLink, details };
+    }
+  } else {
+    details.push(`❌ Memo type is "${tx.memo_type}", expected "text"`);
+    return { verified: false, transaction: tx, payments: [], horizonLink, details };
+  }
+
+  // 3. Verify the payment operations
+  const payments = await getTransactionPayments(txHash);
+  details.push(`Operations found: ${payments.length}`);
+
+  // For releasePayment: there should be a "payment" operation from coordinator to agent
+  if (expectedRecipient && expectedAmount) {
+    const paymentOp = payments.find(
+      (p) =>
+        p.type === 'payment' &&
+        p.from === expectedSender &&
+        p.to === expectedRecipient,
+    );
+
+    if (!paymentOp) {
+      details.push(`❌ No payment operation from ${expectedSender} to ${expectedRecipient} found`);
+      return { verified: false, transaction: tx, payments, horizonLink, details };
+    }
+
+    details.push(`Payment: ${paymentOp.from} → ${paymentOp.to}, amount: ${paymentOp.amount}`);
+    if (paymentOp.amount !== expectedAmount) {
+      details.push(`❌ Amount mismatch: got "${paymentOp.amount}", expected "${expectedAmount}"`);
+      return { verified: false, transaction: tx, payments, horizonLink, details };
+    }
+  }
+
+  // For lockEscrow: there should be a "create_claimable_balance" operation
+  if (!expectedRecipient && expectedAmount) {
+    const createOp = payments.find((p) => p.type === 'create_claimable_balance');
+    if (!createOp) {
+      details.push(`❌ No create_claimable_balance operation found`);
+      return { verified: false, transaction: tx, payments, horizonLink, details };
+    }
+    details.push(`CreateClaimableBalance: amount ${createOp.amount}`);
+    if (createOp.amount !== expectedAmount) {
+      details.push(`❌ Amount mismatch: got "${createOp.amount}", expected "${expectedAmount}"`);
+      return { verified: false, transaction: tx, payments, horizonLink, details };
+    }
+  }
+
+  details.push('✅ All Horizon verification checks passed');
+  return { verified: true, transaction: tx, payments, horizonLink, details };
 }

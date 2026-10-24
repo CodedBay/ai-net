@@ -1,3 +1,7 @@
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger({ component: 'agent-heartbeat' });
+
 export interface HeartbeatClientOptions {
   apiBaseUrl: string;
   agentId: string;
@@ -54,7 +58,10 @@ export class HeartbeatClient {
       });
       if (!response.ok) {
         this.consecutiveFailures += 1;
-        console.warn(`[Heartbeat] Heartbeat failed for ${this.agentId}: ${response.status} (failure #${this.consecutiveFailures})`);
+        logger.warn(
+          { agentId: this.agentId, status: response.status, failureCount: this.consecutiveFailures },
+          'agent heartbeat failed',
+        );
         if (this.consecutiveFailures >= this.failureThreshold && this.onFailureThresholdReached) {
           this.onFailureThresholdReached(this.consecutiveFailures);
         }
@@ -63,7 +70,10 @@ export class HeartbeatClient {
       }
     } catch (err) {
       this.consecutiveFailures += 1;
-      console.warn(`[Heartbeat] Heartbeat error for ${this.agentId}:`, err instanceof Error ? err.message : 'unknown', `(failure #${this.consecutiveFailures})`);
+      logger.warn(
+        { agentId: this.agentId, failureCount: this.consecutiveFailures, err },
+        'agent heartbeat request failed',
+      );
       if (this.consecutiveFailures >= this.failureThreshold && this.onFailureThresholdReached) {
         this.onFailureThresholdReached(this.consecutiveFailures);
       }

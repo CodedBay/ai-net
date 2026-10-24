@@ -17,6 +17,8 @@ import { eventBus } from "./coordinator/eventBus";
 import { createDefaultReconciliationService } from "./services/reconciliation";
 import { createLogger } from "./utils/logger";
 import { redactedConfigSnapshot } from "./config";
+import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
+import { TaskResultStorageService } from "./services/taskResultStorage";
 
 async function main() {
   const logger = createLogger({ module: "server" });
@@ -37,25 +39,12 @@ async function main() {
     const cleanupService = new AgentCleanupService();
     cleanupService.start();
 
+    const taskResultStorage = new TaskResultStorageService(createTaskDb(getTaskDb()));
+    taskResultStorage.startCleanup();
+
     // Start daily payment reconciliation
     const reconciliationService = createDefaultReconciliationService();
     reconciliationService.startDaily(config.RECONCILIATION_INTERVAL_MS);
-
-    // Start SQLite maintenance (WAL checkpoint, vacuum, backup)
-    const maintenanceService = new DbMaintenanceService(defaultMaintenanceDatabases(), {
-      intervalMs: config.DB_MAINTENANCE_INTERVAL_MS,
-      vacuumThreshold: config.DB_MAINTENANCE_VACUUM_THRESHOLD,
-      backupDir: config.DB_BACKUP_DIR,
-      backupRetentionCount: config.DB_BACKUP_RETENTION_COUNT,
-    });
-    maintenanceService.start();
-
-    // Start error-registry maintenance (expiry sweep + per-agent cap)
-    const errorRegistryMaintenance = new ErrorRegistryMaintenanceService({
-      intervalMs: config.ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS,
-      capPerAgent: config.ERROR_REGISTRY_CAP_PER_AGENT,
-    });
-    errorRegistryMaintenance.start();
 
     // Create and start the server
     const { httpServer, close } = createApp({
@@ -69,29 +58,11 @@ async function main() {
     });
 
     // ── Graceful shutdown ──────────────────────────────────────────────────────
-    const shutdown = (signal: string) => {
-      logger.info({ signal }, "received shutdown signal");
-      const timeout = setTimeout(() => {
-        logger.error({ signal }, "forced shutdown after timeout");
-        process.exit(1);
-      }, 10_000);
-
-      cleanupService.stop();
-      reconciliationService.stop();
-      maintenanceService.stop();
-      errorRegistryMaintenance.stop();
-      globalAgentRegistry.shutdown();
-      stopAgentSync();
-
-      httpServer.close(() => {
-        clearTimeout(timeout);
-        logger.info({ signal }, "server closed");
-        process.exit(0);
-      });
-    };
-
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-    process.on("SIGINT", () => shutdown("SIGINT"));
+    setupGracefulShutdown(httpServer, close, config, {
+      cleanupService,
+      reconciliationService,
+      globalAgentRegistry,
+    });
 
   } catch (error) {
     logger.error({ err: error }, "failed to start server");
@@ -109,7 +80,7 @@ export interface GracefulShutdownExtras {
  * SIGTERM/SIGINT handler: stop accepting new work, drain in-flight jobs and
  * the WebSocket stream, flush the event store, close every database
  * connection, then exit 0 — or force-exit 1 if any of that takes longer
- * than `config.GRACEFUL_SHUTDOWN_TIMEOUT` seconds.
+ * than `SHUTDOWN_TIMEOUT_MS` (env) or `config.GRACEFUL_SHUTDOWN_TIMEOUT` seconds.
  *
  * In-flight tasks are drained (via `closeApp`, which awaits the job
  * worker's stop()) rather than force-failed: anything still running when
@@ -117,6 +88,15 @@ export interface GracefulShutdownExtras {
  * by the next `JobWorker.start()` (`recoverIncompleteJobs()` resets it to
  * "pending" for retry) — see `docs/e2e-testing.md` and
  * `tests/shutdown.test.ts` for the restart-mid-stream scenario.
+ *
+ * Shutdown order:
+ *  1. closeApp()            — stop HTTP/WS, drain job worker
+ *  2. stopAgentSync()       — stop background registry sync
+ *  3. extras (cleanup, reconciliation, globalAgentRegistry)
+ *  4. markAllOffline()      — mark agents offline in the DB
+ *  5. eventBus.store.close() — flush event store
+ *  6. closeDb / closeAgentDb / closeTaskDb / closeJobDb — close all databases
+ *  7. process.exit(0)
  */
 export function setupGracefulShutdown(
   httpServer: any,
@@ -127,19 +107,25 @@ export function setupGracefulShutdown(
   const logger = createLogger({ module: "shutdown" });
   let isShuttingDown = false;
 
+  // Support SHUTDOWN_TIMEOUT_MS env var as override (in milliseconds)
+  const timeoutMs =
+    process.env.SHUTDOWN_TIMEOUT_MS !== undefined
+      ? parseInt(process.env.SHUTDOWN_TIMEOUT_MS, 10)
+      : (config.GRACEFUL_SHUTDOWN_TIMEOUT ?? 30) * 1000;
+
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
     logger.info({ signal }, "starting graceful shutdown sequence");
 
-    const timeoutDuration = (config.GRACEFUL_SHUTDOWN_TIMEOUT ?? 30) * 1000;
     const forcedTimeout = setTimeout(() => {
-      logger.error({ signal, timeoutSeconds: timeoutDuration / 1000 }, "force-killing timed out shutdown");
+      logger.error({ signal, timeoutMs }, "force-killing timed out shutdown");
       process.exit(1);
-    }, timeoutDuration);
+    }, timeoutMs);
 
     try {
+      // Phase 1: close HTTP/WS server and drain in-flight job worker
       logger.info("closing http/ws server");
       await new Promise<void>((resolve) => {
         closeApp(() => {
@@ -148,20 +134,14 @@ export function setupGracefulShutdown(
         });
       });
 
-      logger.info("stopping agent sync service");
+      // Phase 2: stop background services
+      logger.info("stopping agent sync and background services");
       stopAgentSync();
       extras.cleanupService?.stop();
       extras.reconciliationService?.stop();
       extras.globalAgentRegistry?.shutdown();
 
-      logger.info("failing running tasks");
-      try {
-        const taskDb = createTaskDb(getTaskDb());
-        taskDb.failRunningTasks();
-      } catch (err) {
-        logger.error({ err }, "failed to mark tasks as failed during shutdown");
-      }
-
+      // Phase 3: mark online agents offline so stale capacity is not advertised
       logger.info("marking online agents offline");
       try {
         const agentDb = createAgentDb(getAgentDb());
@@ -170,6 +150,15 @@ export function setupGracefulShutdown(
         logger.error({ err }, "failed to mark agents offline during shutdown");
       }
 
+      // Phase 4: flush event store
+      logger.info("flushing event store");
+      try {
+        eventBus.store.close();
+      } catch (err) {
+        logger.error({ err }, "failed to close event store during shutdown");
+      }
+
+      // Phase 5: close all database connections
       logger.info("closing database connections");
       closeDb();
       closeAgentDb();
@@ -182,6 +171,7 @@ export function setupGracefulShutdown(
       process.exit(0);
     } catch (error) {
       logger.error({ err: error }, "error during graceful shutdown");
+      clearTimeout(forcedTimeout);
       process.exit(1);
     }
   };

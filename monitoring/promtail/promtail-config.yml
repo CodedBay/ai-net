@@ -1,0 +1,65 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ── Docker container logs ───────────────────────────────────────────────────
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=ai-net"]
+
+    relabel_configs:
+      # Use container name as the service label
+      - source_labels: [__meta_docker_container_name]
+        regex: /(.*)
+        target_label: service
+
+      # Preserve compose project and service labels
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: compose_service
+
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: compose_project
+
+      # Drop containers with no log output
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: logstream
+
+    pipeline_stages:
+      # Parse structured JSON logs emitted by pino
+      - json:
+          expressions:
+            level:     level
+            msg:       msg
+            time:      time
+            requestId: requestId
+            traceId:   traceId
+            spanId:    spanId
+            taskId:    taskId
+            route:     route
+            module:    module
+
+      # Promote log level to a Loki label for efficient querying
+      - labels:
+          level:
+          module:
+
+      # Normalise timestamp from pino ISO format
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+
+      # Drop the raw time field from the log line (already in the stream)
+      - output:
+          source: msg

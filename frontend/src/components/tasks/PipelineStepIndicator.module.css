@@ -1,0 +1,314 @@
+/* PipelineStepIndicator.module.css
+ * Horizontal step indicator for multi-agent task pipelines.
+ * Adapts to a compact progress bar on mobile (≤ 768 px).
+ */
+
+/* ── Container ───────────────────────────────────────────────────────────── */
+
+.container {
+  width: 100%;
+  padding: 1rem 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.elapsed {
+  font-size: 0.7rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Step track (desktop) ────────────────────────────────────────────────── */
+
+.track {
+  display: flex;
+  align-items: flex-start;
+  position: relative;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  /* hide scrollbar on desktop while still scrollable */
+  scrollbar-width: none;
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Individual step ─────────────────────────────────────────────────────── */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 72px;
+  position: relative;
+  cursor: default;
+}
+
+.step--clickable {
+  cursor: pointer;
+}
+
+.step--clickable:focus-visible .icon {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+/* ── Icon circle (32 px) ─────────────────────────────────────────────────── */
+
+.icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 2px solid transparent;
+  position: relative;
+  z-index: 1;
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  flex-shrink: 0;
+}
+
+/* pending */
+.icon--pending {
+  background: var(--surface-elevated, #1e2535);
+  border-color: var(--border-strong, #374151);
+  color: var(--text-muted, #6b7280);
+}
+
+/* active – pulsing blue */
+.icon--active {
+  background: var(--accent-surface-strong, #1d4ed840);
+  border-color: var(--primary, #3b82f6);
+  color: var(--accent-text, #93c5fd);
+  box-shadow: 0 0 0 4px var(--primary-alpha-15, #3b82f625);
+  animation: iconPulse 1.8s ease-in-out infinite;
+}
+
+/* complete – green */
+.icon--complete {
+  background: var(--status-success-surface, #052e1c);
+  border-color: var(--success, #22c55e);
+  color: var(--success, #22c55e);
+  box-shadow: 0 0 8px var(--success-alpha-30, #22c55e30);
+}
+
+/* failed – red */
+.icon--failed {
+  background: var(--status-danger-surface-strong, #2e0505);
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+/* ── Connector line between steps ────────────────────────────────────────── */
+
+.connector {
+  position: absolute;
+  top: 15px; /* vertically center with the 32 px icon */
+  left: calc(50% + 16px);
+  right: calc(-50% + 16px);
+  height: 2px;
+  background: var(--border-strong, #374151);
+  transition: background 0.4s ease;
+  z-index: 0;
+}
+
+.connector--complete {
+  background: var(--success, #22c55e);
+}
+
+/* ── Step label ──────────────────────────────────────────────────────────── */
+
+.label {
+  margin-top: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.25s ease;
+}
+
+.step--active .label {
+  color: var(--accent-text, #93c5fd);
+}
+
+.step--complete .label {
+  color: var(--success, #22c55e);
+}
+
+.step--failed .label {
+  color: var(--danger, #ef4444);
+}
+
+/* ── Step elapsed time ───────────────────────────────────────────────────── */
+
+.stepElapsed {
+  font-size: 0.58rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Side panel (output on click) ────────────────────────────────────────── */
+
+.outputPanel {
+  margin-top: 0.75rem;
+  padding: 0.875rem;
+  background: var(--surface-elevated, #1e2535);
+  border: 1px solid var(--border-strong, #374151);
+  border-radius: var(--radius-lg, 0.5rem);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  max-height: 180px;
+  overflow-y: auto;
+  animation: fadeIn 0.2s ease forwards;
+}
+
+.outputPanel pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  margin: 0;
+}
+
+.outputPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.outputPanelTitle {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  text-transform: capitalize;
+}
+
+.closeButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.closeButton:hover {
+  color: var(--text-primary);
+}
+
+/* ── Mobile compact progress bar (≤ 640 px) ──────────────────────────────── */
+
+@media (max-width: 640px) {
+  .track {
+    display: none;
+  }
+
+  .compactBar {
+    display: block;
+  }
+}
+
+@media (min-width: 641px) {
+  .compactBar {
+    display: none;
+  }
+}
+
+.compactBar {
+  /* shown only on mobile */
+}
+
+.compactBarLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.compactBarTrack {
+  height: 6px;
+  background: var(--surface-elevated, #1e2535);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.compactBarFill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary, #3b82f6);
+  transition: width 0.4s ease;
+}
+
+.compactBarFill--complete {
+  background: var(--success, #22c55e);
+}
+
+.compactBarFill--failed {
+  background: var(--danger, #ef4444);
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+
+@keyframes iconPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px var(--primary-alpha-15, #3b82f625);
+  }
+  50% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Reduced-motion override */
+@media (prefers-reduced-motion: reduce) {
+  .icon--active {
+    animation: none;
+  }
+
+  .outputPanel {
+    animation: none;
+  }
+}

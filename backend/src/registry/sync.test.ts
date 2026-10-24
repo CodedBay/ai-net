@@ -46,11 +46,32 @@ afterEach(() => {
 
 describe("startAgentSync — no contract ID", () => {
   it("does nothing and warns when REGISTRY_CONTRACT_ID is not set", () => {
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-    startAgentSync();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("REGISTRY_CONTRACT_ID"));
+    delete process.env.REGISTRY_CONTRACT_ID;
+    const warn = jest.fn();
+    const loggerMock = {
+      trace: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn,
+      error: jest.fn(),
+      fatal: jest.fn(),
+      child: () => loggerMock,
+    };
+    let isolated!: typeof import("./sync");
+    jest.isolateModules(() => {
+      jest.doMock("../utils/logger", () => ({
+        createLogger: () => loggerMock,
+        default: loggerMock,
+      }));
+      isolated = require("./sync");
+    });
+    isolated.startAgentSync();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("REGISTRY_CONTRACT_ID"),
+    );
     expect(mockGetLatestLedger).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    isolated.stopAgentSync();
+    jest.dontMock("../utils/logger");
   });
 });
 

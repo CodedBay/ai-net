@@ -6,8 +6,42 @@ import {
   updateLogContext,
 } from "../../utils/logger";
 
+const REDACTED_WALLET = "[REDACTED_WALLET]";
+
+// Stellar wallet address pattern: starts with G/C/M followed by 55 Base32 chars
+const STELLAR_ADDRESS_RE = /\b[GCM][A-Z2-7]{55}\b/g;
+
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * Redact a wallet address for safe log emission (Issue #404).
+ * Returns a hash-prefixed placeholder so logs remain correlatable
+ * without leaking the full public key.
+ */
+function redactWallet(wallet: string): string {
+  return `${REDACTED_WALLET}_${hashLogIdentifier(wallet)}`;
+}
+
+/**
+ * Extract and redact a wallet identifier from the request (Issue #404).
+ * Returns a hashed placeholder for correlation without exposing the address.
+ */
+function deriveUserWallet(req: Request): string | undefined {
+  const raw =
+    firstHeader(req.headers["walletpublickey"] as string | string[] | undefined) ??
+    (typeof req.body?.walletPublicKey === "string" ? req.body.walletPublicKey : undefined);
+
+  if (!raw) return undefined;
+  // Validate it looks like a Stellar address before redacting
+  if (STELLAR_ADDRESS_RE.test(raw)) {
+    STELLAR_ADDRESS_RE.lastIndex = 0;
+    return redactWallet(raw);
+  }
+  STELLAR_ADDRESS_RE.lastIndex = 0;
+  // Still hash any wallet-looking value
+  return redactWallet(raw);
 }
 
 function deriveUserId(req: Request): string {
@@ -40,13 +74,23 @@ function deriveRoute(req: Request): string {
 }
 
 function buildLogContext(req: Request, res: Response): Record<string, unknown> {
-  return {
+  const context: Record<string, unknown> = {
     requestId: res.locals.requestId ?? req.requestId,
     traceId: res.locals.traceId ?? res.locals.correlationId ?? req.traceId ?? req.correlationId,
     userId: deriveUserId(req),
     taskId: deriveTaskId(req) ?? "none",
     route: deriveRoute(req),
+    // endpoint: method + normalized path (Issue #404)
+    endpoint: `${req.method} ${deriveRoute(req)}`,
   };
+
+  // Attach redacted wallet for PII-safe correlation (Issue #404)
+  const wallet = deriveUserWallet(req);
+  if (wallet) {
+    context.user_wallet = wallet;
+  }
+
+  return context;
 }
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {

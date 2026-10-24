@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Bot,
   FilePlus2,
+  HelpCircle,
   LayoutDashboard,
   LogOut,
   SunMoon,
@@ -11,6 +12,7 @@ import {
 import type { Command } from '../components/common/CommandPalette';
 import { useTheme } from './useTheme';
 import { useWallet } from './useWallet';
+import { useOnboarding } from './useOnboarding';
 
 /**
  * Global command palette state plus the default command registry.
@@ -25,6 +27,7 @@ export function useCommandPalette() {
   const navigate = useNavigate();
   const { effectiveTheme, setMode } = useTheme();
   const { disconnect } = useWallet();
+  const { reopen: reopenOnboarding } = useOnboarding();
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -78,8 +81,15 @@ export function useCommandPalette() {
         category: 'settings',
         action: () => disconnect(),
       },
+      {
+        id: 'open-onboarding',
+        label: 'Help: Restart Onboarding Tour',
+        icon: HelpCircle,
+        category: 'settings',
+        action: () => reopenOnboarding(),
+      },
     ];
-  }, [navigate, effectiveTheme, setMode, disconnect]);
+  }, [navigate, effectiveTheme, setMode, disconnect, reopenOnboarding]);
 
   // Global shortcut: Cmd+K (macOS) / Ctrl+K (other) toggles the palette.
   useEffect(() => {

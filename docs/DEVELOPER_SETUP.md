@@ -121,6 +121,10 @@ cargo test
 
 ## 4. Wallet Setup (Freighter Browser Extension)
 
+For the dedicated 10-minute guide, including testnet funding alternatives,
+network verification, mobile-wallet limitations, and troubleshooting, see the
+[Freighter Wallet Setup Guide](WALLET_SETUP.md).
+
 To test the frontend with on-chain payments:
 
 1. Install the **[Freighter Wallet Extension](https://www.freighter.app/)** for Chrome / Firefox / Brave.
@@ -172,3 +176,65 @@ cd backend && npm run test:e2e
   ```bash
   git config --global core.autocrlf input
   ```
+
+---
+
+## 7. Staging Environment
+
+Every merge to `main` that passes CI is automatically deployed to the shared staging environment by `.github/workflows/staging-deploy.yml`. This section explains how the pipeline works and how to configure the required secrets.
+
+### How it works
+
+1. The `CI` workflow completes successfully on `main`.
+2. The `Staging Deployment` workflow triggers automatically via `workflow_run`.
+3. Multi-arch Docker images (`linux/amd64` + `linux/arm64`) are built for frontend and backend and pushed to GitHub Container Registry (GHCR):
+   - `ghcr.io/<owner>/ai-net/frontend:staging` (latest)
+   - `ghcr.io/<owner>/ai-net/frontend:sha-<commit>` (immutable)
+   - `ghcr.io/<owner>/ai-net/backend:staging` (latest)
+   - `ghcr.io/<owner>/ai-net/backend:sha-<commit>` (immutable)
+4. Smart contracts are deployed to Stellar testnet (`./smart-contracts/scripts/deploy.sh --network testnet`).
+5. Containers are updated on the staging server via `docker compose pull && docker compose up -d`.
+6. Smoke tests verify the deployment:
+   - `GET /health` → HTTP 200
+   - `GET /api/agents` → valid JSON array/object
+7. On success: a deployment summary (image digests, run URL) is written to the GitHub workflow run summary.
+8. On failure: a GitHub issue is opened automatically with the failure log.
+
+The workflow can also be triggered manually via **GitHub → Actions → Staging Deployment → Run workflow**.
+
+### Staging environment URLs
+
+| Resource | URL |
+|---|---|
+| Frontend | `$STAGING_FRONTEND_URL` (set in the `staging` GitHub environment) |
+| Backend | `$STAGING_BACKEND_URL` (set in the `staging` GitHub environment) |
+
+### Required GitHub Actions secrets and variables
+
+Configure these under **Settings → Environments → staging**:
+
+| Key | Type | Description |
+|---|---|---|
+| `STELLAR_DEPLOY_SECRET` | Secret | Stellar testnet secret key for contract deployment |
+| `STAGING_SSH_KEY` | Secret | SSH private key for the staging server (if using remote SSH deploy) |
+| `STAGING_HOST` | Secret | Hostname or IP of the staging server |
+| `STAGING_FRONTEND_URL` | Variable | Public URL of the staging frontend |
+| `STAGING_BACKEND_URL` | Variable | Public URL of the staging backend |
+| `STELLAR_DEPLOY_ENABLED` | Variable | Set to `true` to enable testnet contract deployment |
+
+> **Forks and first-time setups**: If `STAGING_HOST` is not set, the container
+> deploy step is skipped and a notice is printed. The image build and push steps
+> still run so image artifacts are always produced, even without a staging server.
+
+### Pulling a specific staging image locally
+
+```bash
+# Log in to GHCR
+echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+# Pull the latest staging backend
+docker pull ghcr.io/<owner>/ai-net/backend:staging
+
+# Or a specific commit
+docker pull ghcr.io/<owner>/ai-net/backend:sha-<full-commit-sha>
+```

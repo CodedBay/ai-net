@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 interface TypeaheadOption<T> {
   label: string
@@ -50,3 +50,62 @@ export function useSelectTypeahead<T>({
     onMatch(match.value)
   }, [onMatch, options, timeoutMs])
 }
+
+export interface UseTypeaheadNavOptions<T> {
+  items: readonly T[]
+  onSelect: (item: T) => void
+  isOpen: boolean
+  onClose?: () => void
+}
+
+/**
+ * Handles keyboard navigation (ArrowDown, ArrowUp, Enter, Escape) for typeahead
+ * dropdown suggestion lists.
+ */
+export function useTypeaheadNav<T>({
+  items,
+  onSelect,
+  isOpen,
+  onClose,
+}: UseTypeaheadNavOptions<T>) {
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1)
+
+  useEffect(() => {
+    setHighlightedIndex(-1)
+  }, [items])
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (!isOpen || items.length === 0) {
+        if (event.key === 'Escape') {
+          onClose?.()
+        }
+        return
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setHighlightedIndex((prev) => (prev + 1 >= items.length ? 0 : prev + 1))
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setHighlightedIndex((prev) => (prev <= 0 ? items.length - 1 : prev - 1))
+      } else if (event.key === 'Enter') {
+        if (highlightedIndex >= 0 && highlightedIndex < items.length) {
+          event.preventDefault()
+          onSelect(items[highlightedIndex])
+        }
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose?.()
+      }
+    },
+    [isOpen, items, highlightedIndex, onSelect, onClose],
+  )
+
+  return {
+    highlightedIndex,
+    setHighlightedIndex,
+    handleKeyDown,
+  }
+}
+

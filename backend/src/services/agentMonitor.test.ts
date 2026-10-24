@@ -143,4 +143,71 @@ describe('AgentMonitorService', () => {
     expect(() => monitor.stop()).not.toThrow();
     jest.useRealTimers();
   });
+
+  it('has zero active controllers after each poll cycle (memory-leak regression)', async () => {
+    // Run 1000 poll cycles and verify no AbortControllers leak between cycles.
+    // If controllers accumulate, getActiveControllerCount() will drift upward.
+    const mockFetch = jest.fn().mockResolvedValue({ ok: true });
+    const monitor = new AgentMonitorService({
+      agentRegistry: registry,
+      intervalMs: 30_000,
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    const CYCLES = 1000;
+
+    for (let i = 0; i < CYCLES; i++) {
+      await monitor.checkAllAgents();
+      // After each full cycle all in-flight controllers must have been released.
+      expect(monitor.getActiveControllerCount()).toBe(0);
+    }
+
+    // Total fetches = 2 agents × 1000 cycles.
+    expect(mockFetch).toHaveBeenCalledTimes(2 * CYCLES);
+  });
+
+  it('has zero active controllers when fetch throws (error path)', async () => {
+    const mockFetch = jest.fn().mockRejectedValue(new Error('network error'));
+    const monitor = new AgentMonitorService({
+      agentRegistry: registry,
+      fetchImpl: mockFetch as unknown as typeof fetch,
+    });
+
+    await monitor.checkAllAgents();
+
+    // Even when fetch rejects, the controller must be cleaned up.
+    expect(monitor.getActiveControllerCount()).toBe(0);
+  });
+
+  it('releases controllers immediately on stop()', async () => {
+    // Create a fetch that never resolves so controllers stay in-flight.
+    let fetchResolve: (() => void) | null = null;
+    const hangingFetch = jest.fn().mockReturnValue(
+      new Promise<{ ok: boolean }>((resolve) => {
+        fetchResolve = () => resolve({ ok: true });
+      })
+    );
+
+    const monitor = new AgentMonitorService({
+      agentRegistry: {
+        getAgents: jest.fn().mockReturnValue([agents[0]]),
+        markOffline: markOfflineMock,
+        markOnline: markOnlineMock,
+      },
+      fetchImpl: hangingFetch as unknown as typeof fetch,
+    });
+
+    // Start a check without awaiting — controllers should be in-flight.
+    const checkPromise = monitor.checkAllAgents();
+
+    // stop() should abort in-flight controllers.
+    monitor.stop();
+    expect(monitor.getActiveControllerCount()).toBe(0);
+
+    // Resolve the pending fetch so the test can finish cleanly.
+    // Cast: TS narrows the captured resolver to null at this point because the
+    // assignment happens inside the Promise executor closure.
+    (fetchResolve as (() => void) | null)?.();
+    await checkPromise;
+  });
 });

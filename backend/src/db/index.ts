@@ -3,6 +3,7 @@ import path from "path";
 import { createLogger } from "../utils/logger";
 import { migrateToLatest } from "./migrator";
 import { createPool, type SqlitePool } from "./pool";
+import { poolSettings } from "./poolConfig";
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "payments");
 
@@ -15,20 +16,28 @@ export interface PaymentRecord {
   status: PaymentStatus;
   amountStroops: bigint;
   txHash: string | null;
+  /** ISO-8601 timestamp at which the payment was first recorded. */
+  createdAt?: string;
 }
 
 const logger = createLogger({ component: "payment-db" });
 
 let _pool: SqlitePool | null = null;
 
+/** Register better-sqlite3's optional error hook; older builds lack `.on`. */
+function attachErrorHandler(db: Database.Database): void {
+  const handle = (db as unknown as {
+    on?: (event: string, fn: (error: Error) => void) => unknown;
+  }).on;
+  if (typeof handle !== "function") return;
+  handle.call(db, "error", (error: Error) => {
+    logger.error({ err: error }, "payment database error");
+  });
+}
+
 /** Create the payments schema. Runs once, on the pool's writer connection. */
 function applyPaymentSchema(db: Database.Database): void {
-  (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
-    "error",
-    (error: Error) => {
-      logger.error({ err: error }, "payment database error");
-    },
-  );
+  attachErrorHandler(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS payments (
       taskId       TEXT NOT NULL,
@@ -37,6 +46,7 @@ function applyPaymentSchema(db: Database.Database): void {
       status       TEXT NOT NULL DEFAULT 'locked',
       amountStroops TEXT NOT NULL,
       txHash       TEXT,
+      "createdAt"  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       PRIMARY KEY (taskId, nodeId)
     )
   `);
@@ -48,16 +58,8 @@ export function getPaymentPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "payments.db");
     _pool = createPool({
       filePath,
-      min: 1,
-      max: 4,
-      acquireTimeoutMs: 5_000,
+      ...poolSettings(),
       onCreate: (db) => {
-        (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
-          "error",
-          (error: Error) => {
-            logger.error({ err: error }, "payment database error");
-          },
-        );
         applyPaymentSchema(db);
         migrateToLatest(db, MIGRATIONS_DIR);
       },
@@ -108,13 +110,15 @@ export interface PaymentDb {
 export function createPaymentDb(db: Database.Database): PaymentDb {
   return {
     insert(record: PaymentRecord): void {
+      const createdAt = record.createdAt ?? new Date().toISOString();
       db.prepare(`
-        INSERT INTO payments (taskId, nodeId, balanceId, status, amountStroops, txHash)
-        VALUES (@taskId, @nodeId, @balanceId, @status, @amountStroops, @txHash)
+        INSERT INTO payments (taskId, nodeId, balanceId, status, amountStroops, txHash, "createdAt")
+        VALUES (@taskId, @nodeId, @balanceId, @status, @amountStroops, @txHash, @createdAt)
       `).run({
         ...record,
         amountStroops: record.amountStroops.toString(),
         txHash: record.txHash,
+        createdAt,
       });
     },
 
@@ -130,6 +134,7 @@ export function createPaymentDb(db: Database.Database): PaymentDb {
         status: row.status as PaymentStatus,
         amountStroops: BigInt(row.amountStroops as string),
         txHash: row.txHash as string | null,
+        createdAt: row.createdAt as string | undefined,
       };
     },
 
@@ -148,6 +153,7 @@ export function createPaymentDb(db: Database.Database): PaymentDb {
         status: row.status as PaymentStatus,
         amountStroops: BigInt(row.amountStroops as string),
         txHash: row.txHash as string | null,
+        createdAt: row.createdAt as string | undefined,
       }));
     },
   };

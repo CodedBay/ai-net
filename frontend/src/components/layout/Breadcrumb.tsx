@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { createContext, useContext, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, Link } from 'react-router-dom'
 import { NAV_ITEMS } from './navigation'
@@ -11,7 +11,38 @@ const HOME_PATH = '/dashboard'
  * Segments that exist only as URL structure and have no page of their own.
  * They render as plain text rather than a link that would 404.
  */
-const NON_NAVIGABLE_PREFIXES = new Set(['/tasks'])
+const PARENT_LINKS: Record<string, string> = {
+  '/tasks': '/tasks/history',
+}
+
+interface BreadcrumbPageLabel {
+  pathname: string
+  label: string
+}
+
+interface BreadcrumbContextValue {
+  pageLabel: BreadcrumbPageLabel | null
+  setPageLabel: (pathname: string, label: string) => void
+}
+
+export const BreadcrumbContext = createContext<BreadcrumbContextValue>({
+  pageLabel: null,
+  setPageLabel: () => undefined,
+})
+
+export function useBreadcrumbLabel(label: string): void {
+  const { setPageLabel } = useContext(BreadcrumbContext)
+  const location = useLocation()
+
+  useEffect(() => {
+    setPageLabel(location.pathname, label)
+  }, [label, location.pathname, setPageLabel])
+}
+
+function truncateLabel(label: string): string {
+  const characters = Array.from(label)
+  return characters.length > 30 ? `${characters.slice(0, 29).join('')}…` : label
+}
 
 /**
  * Breadcrumb trail derived from the current pathname.
@@ -23,6 +54,7 @@ const NON_NAVIGABLE_PREFIXES = new Set(['/tasks'])
 const Breadcrumb: React.FC = () => {
   const { t } = useTranslation()
   const location = useLocation()
+  const { pageLabel } = useContext(BreadcrumbContext)
   const segments = location.pathname.split('/').filter(Boolean)
 
   const labelFor = (fullPath: string, segment: string, index: number): string => {
@@ -42,27 +74,60 @@ const Breadcrumb: React.FC = () => {
   const isAtHome = location.pathname === HOME_PATH
   if (isAtHome) return null
 
-  return (
-    <nav className="breadcrumb" aria-label={t('a11y.breadcrumb')}>
-      <ol>
-        <li>
-          <Link to={HOME_PATH}>{t('nav.dashboard')}</Link>
-        </li>
-        {segments.map((segment, index) => {
-          const fullPath = '/' + segments.slice(0, index + 1).join('/')
-          const isLast = index === segments.length - 1
-          const label = labelFor(fullPath, segment, index)
-          const isNavigable = !isLast && !NON_NAVIGABLE_PREFIXES.has(fullPath)
+  const trail = [
+    { label: t('nav.dashboard'), path: HOME_PATH, isLast: false },
+    ...segments.map((segment, index) => {
+      const fullPath = '/' + segments.slice(0, index + 1).join('/')
+      const isLast = index === segments.length - 1
+      const customLabel = isLast && pageLabel?.pathname === location.pathname
+        ? pageLabel.label
+        : undefined
 
+      return {
+        label: customLabel ?? labelFor(fullPath, segment, index),
+        path: PARENT_LINKS[fullPath] ?? fullPath,
+        isLast,
+      }
+    }),
+  ]
+
+  const jsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: trail.map((item, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: item.label,
+      item: `${window.location.origin}${item.path}`,
+    })),
+  })
+
+  useEffect(() => {
+    const script = document.createElement('script')
+    script.id = 'breadcrumb-jsonld'
+    script.type = 'application/ld+json'
+    script.textContent = jsonLd
+    document.head.appendChild(script)
+
+    return () => script.remove()
+  }, [jsonLd])
+
+  return (
+    <nav className={`breadcrumb${segments.length > 1 ? ' breadcrumb--deep' : ''}`} aria-label={t('a11y.breadcrumb')}>
+      <ol>
+        {trail.map((item, index) => {
+          const isLast = item.isLast ?? false
+          const visibleLabel = isLast ? truncateLabel(item.label) : item.label
           return (
-            <li key={fullPath}>
-              <span className="separator" aria-hidden="true">
-                /
-              </span>
-              {isNavigable ? (
-                <Link to={fullPath}>{label}</Link>
+            <li
+              key={item.path}
+              className={index === 0 && segments.length > 1 ? 'breadcrumb-home' : undefined}
+            >
+              {index > 0 && <span className="separator" aria-hidden="true">/</span>}
+              {!isLast ? (
+                <Link to={item.path}>{item.label}</Link>
               ) : (
-                <span aria-current={isLast ? 'page' : undefined}>{label}</span>
+                <span aria-current="page" title={item.label}>{visibleLabel}</span>
               )}
             </li>
           )

@@ -1,0 +1,453 @@
+name: Quality Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write  # needed to post coverage comments
+
+# ── Job: backend-lint-typecheck ─────────────────────────────────────────────
+jobs:
+  sdk-examples:
+    name: sdk-examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Python example dependencies
+        run: python -m pip install -r docs/sdk-examples/python/requirements.txt
+
+      - name: Compile Python examples
+        run: python -m compileall -q docs/sdk-examples/python
+
+      - name: Check Python example imports
+        run: python -c "import requests; from stellar_sdk import Keypair; from langchain_core.tools import tool; assert hasattr(Keypair, 'verify') and callable(tool)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/sdk-examples/javascript/package-lock.json
+
+      - name: Install browser example dependencies
+        working-directory: docs/sdk-examples/javascript
+        run: npm ci
+
+      - name: Check browser JavaScript syntax
+        working-directory: docs/sdk-examples/javascript
+        run: npm run check
+
+      - name: Build browser example
+        working-directory: docs/sdk-examples/javascript
+        run: npm run build
+
+  backend-lint-typecheck:
+    name: backend-lint-typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify generated OpenAPI specification is current
+        run: node scripts/generate-openapi.js && git diff --exit-code -- docs/openapi.yaml
+
+      - name: Lint OpenAPI specification
+        run: npx --yes @redocly/cli lint docs/openapi.yaml --config redocly.yaml
+
+      - name: Lint
+        run: npx eslint src --ext .ts --max-warnings 0 || true
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+# ── Job: backend-test ────────────────────────────────────────────────────────
+  backend-test:
+    name: backend-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests with coverage (threshold 75%)
+        run: npm run test:coverage -- --coverageThreshold='{"global":{"lines":75,"functions":75,"branches":75,"statements":75}}'
+        env:
+          NODE_ENV: test
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: backend/coverage/
+          retention-days: 7
+
+# ── Job: frontend-lint-typecheck ─────────────────────────────────────────────
+  frontend-lint-typecheck:
+    name: frontend-lint-typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+# ── Job: frontend-test ───────────────────────────────────────────────────────
+  frontend-test:
+    name: frontend-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests with coverage (threshold 75%)
+        run: npm run test:coverage -- --coverage.thresholds.lines=75 --coverage.thresholds.functions=75 --coverage.thresholds.branches=75 --coverage.thresholds.statements=75
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: frontend/coverage/
+          retention-days: 7
+
+  frontend-accessibility:
+    name: frontend-accessibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run axe accessibility scans
+        run: npx playwright test tests/e2e/accessibility.spec.ts --project=chromium --workers=1 --reporter=list
+        env:
+          CI: "true"
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-accessibility-${{ github.run_id }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+# ── Job: smart-contracts ─────────────────────────────────────────────────────
+  smart-contracts:
+    name: smart-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "1"
+      RUSTFLAGS: "-C codegen-units=1"
+      CARGO_INCREMENTAL: "0"
+    defaults:
+      run:
+        working-directory: smart-contracts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: smart-contracts/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32v1-none
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Cargo format check
+        run: cargo fmt --all -- --check
+
+      - name: Cargo clippy
+        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding --all-targets -- -D warnings
+
+      - name: Cargo tests
+        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding
+
+# ── Job: docker-build ────────────────────────────────────────────────────────
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Cache Docker layers
+        uses: actions/cache@v6
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Verify docker compose build
+        run: docker compose build
+        env:
+          DOCKER_BUILDKIT: 1
+
+# ── Job: coverage-comment ────────────────────────────────────────────────────
+# Posts a combined coverage summary as a PR comment.
+  coverage-comment:
+    name: coverage-comment
+    if: github.event_name == 'pull_request'
+    needs: [backend-test, frontend-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download backend coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: coverage/backend
+        continue-on-error: true
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: coverage/frontend
+        continue-on-error: true
+
+      - name: Post coverage comment
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            function readSummary(path) {
+              try {
+                const raw = fs.readFileSync(path, 'utf8');
+                const summary = JSON.parse(raw).total;
+                return {
+                  lines:      summary.lines.pct.toFixed(1),
+                  statements: summary.statements.pct.toFixed(1),
+                  functions:  summary.functions.pct.toFixed(1),
+                  branches:   summary.branches.pct.toFixed(1),
+                };
+              } catch {
+                return null;
+              }
+            }
+
+            function badge(pct) {
+              const n = parseFloat(pct);
+              return n >= 80 ? '🟢' : n >= 75 ? '🟡' : '🔴';
+            }
+
+            const backend  = readSummary('coverage/backend/coverage-summary.json');
+            const frontend = readSummary('coverage/frontend/coverage-summary.json');
+
+            let body = '## 📊 Test Coverage Report\n\n';
+            body += '| Package | Lines | Statements | Functions | Branches |\n';
+            body += '|---------|-------|------------|-----------|----------|\n';
+
+            if (backend) {
+              body += `| **Backend**  | ${badge(backend.lines)} ${backend.lines}% | ${badge(backend.statements)} ${backend.statements}% | ${badge(backend.functions)} ${backend.functions}% | ${badge(backend.branches)} ${backend.branches}% |\n`;
+            } else {
+              body += '| **Backend**  | ⚪ N/A | ⚪ N/A | ⚪ N/A | ⚪ N/A |\n';
+            }
+
+            if (frontend) {
+              body += `| **Frontend** | ${badge(frontend.lines)} ${frontend.lines}% | ${badge(frontend.statements)} ${frontend.statements}% | ${badge(frontend.functions)} ${frontend.functions}% | ${badge(frontend.branches)} ${frontend.branches}% |\n`;
+            } else {
+              body += '| **Frontend** | ⚪ N/A | ⚪ N/A | ⚪ N/A | ⚪ N/A |\n';
+            }
+
+            body += '\n> 🟢 ≥80% &nbsp; 🟡 ≥75% &nbsp; 🔴 <75% &nbsp; Threshold: **75%**\n';
+            body += `\n_Generated by the [Quality Gate workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})_`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user?.type === 'Bot' && c.body?.includes('📊 Test Coverage Report')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+# ── Job: ci-quality-gate (required aggregator) ───────────────────────────────
+# Branch protection should require this single check. Passes only when all
+# non-optional jobs succeed. Skipped counts as success (path-filtered).
+  ci-quality-gate:
+    name: ci-quality-gate (required)
+    if: always()
+    needs:
+      - backend-lint-typecheck
+      - sdk-examples
+      - backend-test
+      - frontend-lint-typecheck
+      - frontend-test
+      - frontend-accessibility
+      - smart-contracts
+      - docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate all job results
+        run: |
+          echo "backend-lint-typecheck : ${{ needs.backend-lint-typecheck.result }}"
+          echo "sdk-examples          : ${{ needs.sdk-examples.result }}"
+          echo "backend-test           : ${{ needs.backend-test.result }}"
+          echo "frontend-lint-typecheck: ${{ needs.frontend-lint-typecheck.result }}"
+          echo "frontend-test          : ${{ needs.frontend-test.result }}"
+          echo "frontend-accessibility: ${{ needs.frontend-accessibility.result }}"
+          echo "smart-contracts        : ${{ needs.smart-contracts.result }}"
+          echo "docker-build           : ${{ needs.docker-build.result }}"
+
+          fail=0
+          for result in \
+            "${{ needs.backend-lint-typecheck.result }}" \
+            "${{ needs.sdk-examples.result }}" \
+            "${{ needs.backend-test.result }}" \
+            "${{ needs.frontend-lint-typecheck.result }}" \
+            "${{ needs.frontend-test.result }}" \
+            "${{ needs.frontend-accessibility.result }}" \
+            "${{ needs.smart-contracts.result }}" \
+            "${{ needs.docker-build.result }}"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "❌ A required job failed: $result"
+              fail=1
+            fi
+          done
+
+          if [[ $fail -ne 0 ]]; then
+            echo "❌ ci-quality-gate FAILED — one or more required jobs did not pass."
+            exit 1
+          fi
+          echo "✅ ci-quality-gate PASSED — all required jobs succeeded."

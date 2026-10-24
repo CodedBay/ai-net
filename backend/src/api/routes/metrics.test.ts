@@ -104,7 +104,7 @@ describe("Prometheus Metrics Route (Issue #499)", () => {
     expect(res.body.status).toBe("ok");
     expect(typeof res.body.uptimeSeconds).toBe("number");
     expect(typeof res.body.lastScrapeTimestamp).toBe("string");
-    expect(res.body.metricFamiliesCount).toBe(8);
+    expect(res.body.metricFamiliesCount).toBe(17);
     expect(res.body.registeredOnce).toBe(true);
   });
 

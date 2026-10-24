@@ -76,7 +76,7 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
   );
 };
 
-const DesignRenderer: React.FC<Props> = ({ result }) => {
+const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
   const details = getDesignDetails(result);
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
@@ -123,10 +123,10 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
   return (
     <div className="design-renderer" id="design-output">
       {/* Design Outputs & Wireframes Gallery */}
-      {details.images.length > 0 && (
+      {filteredImages.length > 0 && (
         <div style={{ marginBottom: '32px' }} data-testid="design-images-gallery">
           <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>
-            {t('agent.design.outputsTitle', { total: details.images.length })}
+            {t('agent.design.outputsTitle', { total: filteredImages.length })}
           </h4>
           <div
             style={{
@@ -135,10 +135,10 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
               gap: '16px',
             }}
           >
-            {details.images.map((img, idx) => (
+            {filteredImages.map((img, idx) => (
               <div
                 key={`design-img-${idx}`}
-                onClick={() => lightbox.openLightbox(details.images, idx)}
+                onClick={() => lightbox.openLightbox(filteredImages, idx)}
                 style={{
                   position: 'relative',
                   backgroundColor: 'var(--surface-hover-subtle)',
