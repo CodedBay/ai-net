@@ -23,8 +23,8 @@
   z-index: 2000;
   padding: 10px 16px;
   border-radius: 0 0 8px 8px;
-  background: var(--primary, #3b82f6);
-  color: #ffffff;
+  background: var(--primary, var(--accent-info));
+  color: var(--text-inverse);
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
@@ -67,5 +67,14 @@
   .main-content.sidebar-collapsed {
     margin-left: 0;
     padding: 16px;
+  }
+}
+
+/* Tablet-specific padding adjustments (768px–1023px) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .main-content,
+  .main-content.sidebar-collapsed {
+    margin-left: 0;
+    padding: 20px 24px;
   }
 }

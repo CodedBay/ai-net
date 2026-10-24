@@ -23,10 +23,10 @@
   flex-direction: column;
   width: min(320px, 86vw);
   padding-left: env(safe-area-inset-left);
-  background: var(--bg-primary, #ffffff);
+  background: var(--bg-primary, var(--surface-canvas));
   border-top-right-radius: 20px;
   border-bottom-right-radius: 20px;
-  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 8px 0 32px color-mix(in srgb, var(--surface-black) 20%, transparent);
   z-index: 1200;
   overflow: hidden;
   touch-action: pan-y;
@@ -45,7 +45,7 @@
   width: 4px;
   height: 36px;
   transform: translateY(-50%);
-  background: var(--border-color, #cbd5e1);
+  background: var(--border-color, var(--surface-hover));
   border-radius: 2px;
 }
 
@@ -57,7 +57,7 @@
   padding: 12px 24px 16px;
   /* After the shorthand, or it would be overwritten. */
   padding-top: calc(12px + env(safe-area-inset-top));
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-color, var(--border-strong));
 }
 
 .drawer-header h2 {
@@ -88,7 +88,7 @@
 }
 
 .close-btn:active {
-  background: var(--bg-secondary, #f1f5f9);
+  background: var(--bg-secondary, var(--surface-hover));
   transform: scale(0.92);
 }
 
@@ -104,7 +104,7 @@
 .drawer-nav .nav-group + .nav-group {
   margin-top: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-top: 1px solid var(--border-color, var(--border-strong));
 }
 
 .drawer-nav .nav-group-label {
@@ -114,7 +114,7 @@
   font-weight: 600;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, var(--text-secondary));
   opacity: 0.6;
 }
 

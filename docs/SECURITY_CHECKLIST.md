@@ -63,6 +63,20 @@ Unchecked items must have a tracked issue with owner and ETA.
 
 ---
 
+## On-Chain Threat Controls
+
+Added per on-chain threat analysis in `docs/THREAT_MODEL.md` §8–10.
+
+- [ ] **OC1** — Payment: `releasePayment` rejects escrow not in `Locked` state (prevents partial-release drain)
+- [ ] **OC2** — Registry: all list/query functions enforce a hard `max_items` limit ≤ 100 (prevents gas exhaustion DoS)
+- [ ] **OC3** — Upgrade Manager: admin keypair stored in HSM/KMS for mainnet (not in environment variables)
+- [ ] **OC4** — Bidding: `reveal_bid` validates the revealer matches the original committer address (prevents bid sniping)
+- [ ] **OC5** — Registry: reputation score increments require off-chain quality validation (prevents fake-task inflation)
+- [ ] **OC6** — Upgrade Manager: `propose_upgrade` → `execute_upgrade` enforces minimum 48-hour on-chain timelock
+- [ ] **OC7** — Oracle: no external price feed used without TWAP median and ≥5 independent feeders (or no oracle used)
+
+---
+
 ## Sign-Off
 
 | Item | Owner | Status | Date |

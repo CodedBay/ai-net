@@ -79,7 +79,7 @@ const Navbar: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80 shadow-[0_1px_0_rgba(255,255,255,0.02)]">
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80">
         {/* Left: Hamburger + Logo + Marketing Links */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-1.5">
@@ -103,7 +103,7 @@ const Navbar: React.FC = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
+              <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-info-glow">
                 a
               </div>
               <span className="font-semibold text-[14px] text-text-primary tracking-wide">
@@ -140,7 +140,7 @@ const Navbar: React.FC = () => {
 
         {/* Center: Global Search (Desktop) */}
         <div className="flex-1 max-w-[280px] mx-4 hidden lg:block">
-          <div className="flex items-center w-full h-[32px] rounded-lg border border-border-subtle/60 bg-background-surface/40 hover:bg-background-surface/70 transition-all group focus-within:border-accent-cyan/30 focus-within:bg-background-surface/80 focus-within:shadow-[0_0_10px_rgba(56,189,248,0.05)]">
+          <div className="flex items-center w-full h-[32px] rounded-lg border border-border-subtle/60 bg-background-surface/40 hover:bg-background-surface/70 transition-all group focus-within:border-accent-cyan/30 focus-within:bg-background-surface/80 focus-within:shadow-info-glow-subtle">
             <div className="flex items-center gap-1.5 pl-2.5 pr-1 pointer-events-none">
               <Search size={13} className="text-text-secondary/30 group-focus-within:text-accent-cyan/60 transition-colors" />
             </div>
@@ -292,7 +292,7 @@ const Navbar: React.FC = () => {
               transition={{ type: 'spring', damping: 30, stiffness: 320 }}
             >
               <div className="flex items-center gap-2.5 px-3 pb-4 mb-3 border-b border-border-subtle/60">
-                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-info-glow">
+                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-inverse text-[13px] shadow-info-glow">
                   a
                 </div>
                 <div className="flex flex-col">

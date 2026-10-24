@@ -64,7 +64,7 @@
 }
 
 .row:active td {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
 .row:focus-visible {
@@ -90,9 +90,9 @@
 }
 
 .pill {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #C7D2FE;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--text-muted);
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   font-size: 0.72rem;
@@ -132,8 +132,8 @@
 }
 
 .starFg {
-  color: #FCD34D;
-  fill: #fbbf24;
+  color: var(--status-warning-text);
+  fill: var(--status-warning-text);
 }
 
 .starValue {
@@ -154,15 +154,15 @@
 }
 
 .statusActive {
-  background: rgba(16, 185, 129, 0.15);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #6EE7B7;
+  background: color-mix(in srgb, var(--status-success) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-success) 30%, transparent);
+  color: var(--status-success-text);
 }
 
 .statusInactive {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #FCA5A5;
+  background: color-mix(in srgb, var(--status-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 30%, transparent);
+  color: var(--status-danger-text);
 }
 
 .detailsButton {
@@ -174,6 +174,7 @@
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
+  min-height: 44px;
 }
 
 .detailsButton:hover {

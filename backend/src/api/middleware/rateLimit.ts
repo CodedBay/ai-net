@@ -2,6 +2,11 @@ import { LRUCache } from "lru-cache";
 import type { Request, Response, NextFunction } from "express";
 import { getConfig } from "../../config";
 
+/** Internal sliding-window state per tracked IP. */
+interface SlidingWindow {
+  timestamps: number[];
+}
+
 export interface RateLimitOptions {
   /** Rolling window in milliseconds. Default: 60 000 (1 minute). */
   windowMs?: number;
@@ -59,38 +64,65 @@ function setRateLimitHeaders(
 }
 
 /**
+ * Extract a rate-limit key from the request.
+ *
+ * For authenticated routes we key by wallet address so that a single wallet
+ * cannot circumvent limits by rotating IP addresses (e.g. when behind a NAT
+ * or load balancer). For unauthenticated routes we fall back to the client IP.
+ *
+ * Wallet address is read from the `walletpublickey` request header, which is
+ * the convention already used by the rest of the codebase (task routes,
+ * idempotency middleware, etc.).
+ */
+export function extractRateLimitKey(req: Request, useWallet = false): string {
+  if (useWallet) {
+    const walletKey = req.headers["walletpublickey"];
+    if (typeof walletKey === "string" && walletKey.trim().length > 0) {
+      return `wallet:${walletKey.trim()}`;
+    }
+  }
+  return `ip:${req.ip ?? "unknown"}`;
+}
+
+/**
  * Create a configurable in-memory sliding-window rate limiter.
  *
  * Backing store is `lru-cache`, which provides:
- *  - a hard cap on entry count (`maxEntries`) bounding memory under IP floods
+ *  - a hard cap on entry count (`maxEntries`) bounding memory under IP/wallet floods
  *    (issue #154); and
- *  - TTL-based eviction so quiet IPs drop out automatically.
+ *  - TTL-based eviction so quiet keys drop out automatically.
  *
  * Standard rate-limit headers are emitted on every response so clients can
  * proactively back off rather than only learning about limits on 429.
+ *
+ * @param opts          Configuration options (see RateLimitOptions).
+ * @param useWalletKey  When true the limiter keys by wallet address extracted
+ *                      from the `walletpublickey` header, falling back to IP.
+ *                      Defaults to false (IP-only keying).
  */
-export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
+export function createRateLimiter(opts: RateLimitOptions = {}, useWalletKey = false): RateLimiter {
   const windowMs = opts.windowMs ?? 60_000;
   const maxRequests = opts.maxRequests ?? 20;
   const maxEntries = opts.maxEntries ?? 10_000;
 
-  const windows = new LRUCache<string, Window>({
+  const windows = new LRUCache<string, SlidingWindow>({
     max: maxEntries,
     ttl: windowMs,
-    // Don't refresh age on read: a 429 must not let stale IPs linger.
+    // Don't refresh age on read: a 429 must not let stale keys linger.
     updateAgeOnGet: false,
   });
 
   function middleware(req: Request, res: Response, next: NextFunction): void {
-    // NOTE: req.ip depends on Express's `trust proxy` setting. Until trust
-    // proxy is configured every untrusted request collapses to "unknown",
-    // making this effectively a global cap.
-    const ip = req.ip ?? "unknown";
+    // Key by wallet (when configured) so rotating IPs cannot bypass the
+    // limit; otherwise by IP. NOTE: req.ip depends on Express's `trust proxy`
+    // setting. Until trust proxy is configured every untrusted request
+    // collapses to "unknown", making this effectively a global cap.
+    const key = extractRateLimitKey(req, useWalletKey);
     const now = Date.now();
     const cutoff = now - windowMs;
 
-    let win = windows.get(ip) ?? { timestamps: [] };
-    win.timestamps = win.timestamps.filter((t) => t > cutoff);
+    let win = windows.get(key) ?? { timestamps: [] };
+    win.timestamps = win.timestamps.filter((t: number) => t > cutoff);
 
     const oldest = win.timestamps[0];
     const resetAtMs = oldest !== undefined ? oldest + windowMs : now + windowMs;
@@ -102,25 +134,12 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
       res.setHeader("Retry-After", String(retryAfter));
       res
         .status(429)
-        .json({ error: { message: "Too many requests", code: "RATE_LIMITED" } });
+        .json({ error: { message: "Too many requests", code: "RATE_LIMIT_EXCEEDED" } });
       return;
     }
-  }
-
-  async getStatus(key: string, rule: RateLimitRule): Promise<{ remaining: number; resetTime: number } | null> {
-    const state = await this.client.hmget(`ratelimit:${key}`, "tokens", "lastRefill");
-    if (!state[0]) return null;
-
-    const tokensState = Number(state[0]);
-    const lastRefill = Number(state[1]);
-    const now = Date.now();
-    
-    const timePassed = Math.max(0, now - lastRefill);
-    const refillAmount = (timePassed / rule.windowMs) * rule.maxRequests;
-    const tokens = Math.min(rule.maxRequests, tokensState + refillAmount);
 
     win.timestamps.push(now);
-    windows.set(ip, win);
+    windows.set(key, win);
 
     // Emit headers on every allowed response so clients can track quota.
     setRateLimitHeaders(res, maxRequests, remaining - 1, resetAtMs);
@@ -128,108 +147,25 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
     next();
   }
 
-  async consume(key: string, rule: RateLimitRule): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
-    const now = Date.now();
-    const luaScript = `
-      local key = KEYS[1]
-      local maxRequests = tonumber(ARGV[1])
-      local windowMs = tonumber(ARGV[2])
-      local now = tonumber(ARGV[3])
-      
-      local state = redis.call("HMGET", key, "tokens", "lastRefill")
-      local tokens = tonumber(state[1])
-      local lastRefill = tonumber(state[2])
-      
-      if tokens == nil then
-        tokens = maxRequests
-        lastRefill = now
-      else
-        local timePassed = math.max(0, now - lastRefill)
-        local refillAmount = (timePassed / windowMs) * maxRequests
-        tokens = math.min(maxRequests, tokens + refillAmount)
-        lastRefill = now
-      end
-      
-      local allowed = false
-      if tokens >= 1 then
-        tokens = tokens - 1
-        allowed = true
-      end
-      
-      redis.call("HMSET", key, "tokens", tokens, "lastRefill", lastRefill)
-      redis.call("PEXPIRE", key, windowMs)
-      
-      return { allowed and 1 or 0, tokens }
-    `;
-
-    const result = await this.client.eval(luaScript, 1, `ratelimit:${key}`, rule.maxRequests, rule.windowMs, now);
-    const allowed = result[0] === 1;
-    const tokens = Number(result[1]);
-    
-    if (allowed) {
-      return { allowed, remaining: Math.floor(tokens), resetTime: now + rule.windowMs };
-    }
-    
-    const timeUntilNextToken = (1 - tokens) * (rule.windowMs / rule.maxRequests);
-    return { allowed, remaining: 0, resetTime: now + timeUntilNextToken };
-  }
-}
-
-let limiterInstance: RateLimiter | null = null;
-
-export function getRateLimiter(): RateLimiter {
-  if (!limiterInstance) {
-    if (config.CACHE_DRIVER === "redis") {
-      limiterInstance = new RedisRateLimiter(config.REDIS_URL);
-    } else {
-      limiterInstance = new InMemoryRateLimiter();
-    }
-  }
-  return limiterInstance;
-}
-
-export function createMiddleware(rule: RateLimitRule, keyPrefix: string = "global", useIpOnly: boolean = false) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const limiter = getRateLimiter();
-      // Prefer walletPublicKey if present in headers, otherwise fallback to IP
-      // If useIpOnly is true, strict IP limit (Global limit)
-      const walletPublicKey = req.headers["walletpublickey"] as string | undefined;
-      const id = useIpOnly ? (req.ip || "unknown") : (walletPublicKey || req.ip || "unknown");
-      const key = `${keyPrefix}:${id}`;
-
-      const { allowed, remaining, resetTime } = await limiter.consume(key, rule);
-
-      const retryAfterSeconds = Math.ceil(Math.max(0, resetTime - Date.now()) / 1000);
-      res.setHeader(`X-RateLimit-Limit-${keyPrefix}`, rule.maxRequests);
-      res.setHeader(`X-RateLimit-Remaining-${keyPrefix}`, remaining);
-      res.setHeader(`X-RateLimit-Reset-${keyPrefix}`, Math.ceil(resetTime / 1000));
-
-      if (!allowed) {
-        res.setHeader("Retry-After", String(retryAfterSeconds));
-        rateLimitEvents.emit("RATE_LIMITED", { key, prefix: keyPrefix, rule });
-        
-        const correlationId = res.locals.correlationId as string | undefined;
-        next(new RateLimitError("Too many requests", { remaining, resetTime }, correlationId));
-        return;
-      }
-
-      next();
-    } catch (err) {
-      // Fail open on rate limiter cache errors to not break the API
-      console.error("[rateLimit] Error executing rate limit:", err);
-      next();
-    }
+  return {
+    middleware,
+    stop() {
+      windows.clear();
+    },
+    size() {
+      return windows.size;
+    },
   };
 }
 
 // ── Route-group limiters ─────────────────────────────────────────────────────
 //
-// Three groups with distinct limits, all configurable via env vars:
+// Four groups with distinct limits, all configurable via env vars:
 //
-//   public    — unauthenticated endpoints (/api/stats, /api/agents GET, /health)
-//   authed    — authenticated task creation (/api/tasks)
-//   admin     — admin-only endpoints (/api/admin/*)
+//   public      — unauthenticated endpoints (/api/stats, /api/agents GET, /health)
+//   authed      — authenticated task creation (/api/tasks), keyed per wallet
+//   admin       — admin-only endpoints (/api/admin/*)
+//   veniceProxy — endpoints that invoke the Venice AI API, keyed per wallet
 //
 // Limits are intentionally conservative; operators should tune via env.
 
@@ -254,15 +190,18 @@ function readEnvWindowMs(key: string, fallback: number): number {
 export function createPublicLimiter(): RateLimiter {
   return createRateLimiter({
     windowMs: readEnvWindowMs("RATE_LIMIT_PUBLIC_WINDOW_MS", 60_000),
-    maxRequests: readEnvInt("RATE_LIMIT_PUBLIC_MAX_REQUESTS", 120),
+    maxRequests: readEnvInt("RATE_LIMIT_PUBLIC_MAX_REQUESTS", 100),
   });
 }
 
 export function createAuthedLimiter(): RateLimiter {
-  return createRateLimiter({
-    windowMs: readEnvWindowMs("RATE_LIMIT_AUTHED_WINDOW_MS", 60_000),
-    maxRequests: readEnvInt("RATE_LIMIT_AUTHED_MAX_REQUESTS", 30),
-  });
+  return createRateLimiter(
+    {
+      windowMs: readEnvWindowMs("RATE_LIMIT_AUTHED_WINDOW_MS", 60_000),
+      maxRequests: readEnvInt("RATE_LIMIT_AUTHED_MAX_REQUESTS", 30),
+    },
+    true, // keyed by wallet address
+  );
 }
 
 export function createAdminLimiter(): RateLimiter {
@@ -272,16 +211,37 @@ export function createAdminLimiter(): RateLimiter {
   });
 }
 
+/**
+ * Venice AI proxy routes: strict limit to respect upstream API quotas.
+ * 10 req/min per wallet address (configurable via RATE_LIMIT_VENICE_PROXY_*).
+ *
+ * Apply this in front of any endpoint that ultimately invokes the Venice AI
+ * inference API (task creation, agent execution).  Keeping this low prevents
+ * a single wallet from exhausting the shared Venice quota.
+ */
+export function createVeniceProxyLimiter(): RateLimiter {
+  return createRateLimiter(
+    {
+      windowMs: readEnvWindowMs("RATE_LIMIT_VENICE_PROXY_WINDOW_MS", 60_000),
+      maxRequests: readEnvInt("RATE_LIMIT_VENICE_PROXY_MAX_REQUESTS", 10),
+    },
+    true, // keyed by wallet address
+  );
+}
+
 // ── Module-level singleton instances ─────────────────────────────────────────
 
 /** Public routes: generous limit for read-heavy unauthenticated traffic. */
 export const publicLimiter = createPublicLimiter();
 
-/** Authenticated routes: tighter limit for task creation. */
+/** Authenticated routes: tighter limit for task creation, per wallet. */
 export const authedLimiter = createAuthedLimiter();
 
 /** Admin routes: conservative limit for privileged operations. */
 export const adminLimiter = createAdminLimiter();
+
+/** Venice AI proxy routes: strict per-wallet limit protecting upstream quotas. */
+export const veniceProxyLimiter = createVeniceProxyLimiter();
 
 // ── Legacy named exports (kept for backward compatibility) ───────────────────
 
@@ -300,6 +260,10 @@ function getDefaultLimiter(): RateLimiter {
     });
   }
   return defaultLimiter;
+}
+
+export function getRateLimiter(): RateLimiter {
+  return getDefaultLimiter();
 }
 
 export const rateLimitMiddleware = (
@@ -337,3 +301,26 @@ export const registerRateLimitMiddleware = (
  */
 const heartbeatLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
 export const heartbeatRateLimitMiddleware = heartbeatLimiter.middleware;
+
+/**
+ * Reset all module-level singleton rate-limiter instances.
+ *
+ * **For test use only.** Clears every tracked window so tests that create
+ * multiple server instances sharing the same module-level singletons don't
+ * bleed rate-limit state across describe blocks.
+ */
+export function resetRateLimitersForTest(): void {
+  if (defaultLimiter) {
+    defaultLimiter.stop();
+    defaultLimiter = null;
+  }
+  if (registerLimiter) {
+    registerLimiter.stop();
+    registerLimiter = null;
+  }
+  publicLimiter.stop();
+  authedLimiter.stop();
+  adminLimiter.stop();
+  veniceProxyLimiter.stop();
+  heartbeatLimiter.stop();
+}

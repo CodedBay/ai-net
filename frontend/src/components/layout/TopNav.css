@@ -60,8 +60,15 @@
 }
 
 .sidebar-toggle:active {
-  background: var(--bg-surface-alt, #e2e8f0);
+  background: var(--bg-surface-alt);
   transform: scale(0.94);
+}
+
+/* Visible focus indicators for keyboard navigation (#101) */
+.hamburger:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: 2px solid var(--accent, #8b5cf6);
+  outline-offset: 2px;
 }
 
 .logo {
@@ -81,6 +88,30 @@
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-surface-alt);
+  border-color: var(--border-color);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 2px;
 }
 
 .notification-wrapper {
@@ -112,9 +143,9 @@
 }
 
 .notification-bell-btn:active {
-  background: var(--bg-secondary, #1a1f2e);
-  border-color: var(--border-color, #2a3040);
-  color: var(--text-primary, #f5f7fa);
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
   transform: translateY(0) scale(0.94);
 }
 
@@ -164,7 +195,7 @@
 .wallet-chip.connected {
   background: var(--status-success-surface-muted);
   border-color: var(--status-success-border);
-  color: var(--status-success-strong);
+  color: var(--status-success-text);
 }
 
 .wallet-chip.disconnected {
@@ -190,8 +221,13 @@
 }
 
 .disconnect-btn:active {
-  background: #b91c1c;
+  background: var(--status-danger-strong);
   transform: scale(0.96);
+}
+
+.disconnect-btn:focus-visible {
+  outline: 2px solid var(--accent, #8b5cf6);
+  outline-offset: 2px;
 }
 
 .language-switcher {
@@ -225,8 +261,8 @@
 }
 
 .language-option:active {
-  background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-primary, #1a202c);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   transform: scale(0.96);
 }
 
@@ -278,4 +314,82 @@
   .language-flag {
     font-size: 13px;
   }
+}
+
+.connect-wallet-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: var(--text-inverse);
+  border: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s, opacity 0.2s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.connect-wallet-btn:hover {
+  background: var(--primary-hover, #4f46e5);
+}
+
+.connect-wallet-btn:active {
+  transform: scale(0.96);
+}
+
+.connect-wallet-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.wallet-balance {
+  font-variant-numeric: tabular-nums;
+  min-width: 88px;
+  text-align: center;
+}
+
+.wallet-method {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+@media (max-width: 767px) {
+  .connect-wallet-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .connect-wallet-btn span {
+    display: none;
+  }
+
+  .wallet-balance {
+    display: none;
+  }
+
+  .wallet-method {
+    display: none;
+  }
+}
+
+/* ── WS status indicator ─────────────────────────────────────────────────── */
+.ws-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-muted, rgba(255,255,255,0.05));
+  white-space: nowrap;
+}
+
+@keyframes ws-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }

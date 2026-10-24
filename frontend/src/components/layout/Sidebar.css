@@ -4,8 +4,8 @@
   left: 0;
   width: var(--sidebar-width, 280px);
   height: calc(100vh - var(--topnav-height, 64px));
-  background: var(--bg-primary, #ffffff);
-  border-right: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-primary, var(--surface-canvas));
+  border-right: 1px solid var(--border-color, var(--border-strong));
   transition: width 0.3s ease;
   overflow: hidden;
   z-index: 900;
@@ -24,7 +24,7 @@
 .nav-group + .nav-group {
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-top: 1px solid var(--border-color, var(--border-strong));
 }
 
 .nav-group-label {
@@ -34,7 +34,7 @@
   font-weight: 600;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, var(--text-secondary));
   opacity: 0.6;
 }
 
@@ -91,9 +91,21 @@
 }
 
 .nav-item:active {
-  background: var(--bg-surface-alt, #e2e8f0);
-  color: var(--text-primary, #1a202c);
+  background: var(--bg-surface-alt, var(--surface-hover));
+  color: var(--text-primary, var(--text-primary));
   transform: scale(0.97);
+}
+
+/* Visible focus indicator for keyboard navigation (#101) */
+.nav-item:focus-visible {
+  outline: 2px solid var(--accent, #8b5cf6);
+  outline-offset: 2px;
+}
+
+/* Visible focus indicator for keyboard navigation (#101) */
+.nav-item:focus-visible {
+  outline: 2px solid var(--accent, #8b5cf6);
+  outline-offset: 2px;
 }
 
 .nav-item:active .nav-icon {
@@ -101,7 +113,7 @@
 }
 
 .nav-item.active {
-  color: var(--primary, #3b82f6);
+  color: var(--primary, var(--accent-info));
 }
 
 /*
@@ -114,7 +126,7 @@
   inset: 0;
   z-index: 0;
   border-radius: 8px;
-  background: var(--primary-light, rgba(59, 130, 246, 0.1));
+  background: var(--primary-light, color-mix(in srgb, var(--accent-info) 10%, transparent));
 }
 
 .nav-item > .nav-icon,

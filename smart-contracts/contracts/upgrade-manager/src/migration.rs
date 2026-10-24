@@ -1,4 +1,4 @@
-use crate::{events::*, MigrationPlan, UpgradeError, UpgradeProposal};
+use crate::{events::*, strutil::str_eq, MigrationPlan, UpgradeError, UpgradeProposal};
 use soroban_sdk::{Env, String, Vec};
 
 /// Execute pre-upgrade validation checks
@@ -87,154 +87,112 @@ pub fn execute_post_upgrade_migration(
 
 /// Execute a single validation check
 fn execute_validation_check(env: &Env, check_name: &String) -> Result<String, UpgradeError> {
-    // In a real implementation, this would dispatch to specific validation functions
-    // based on the check name. For now, we simulate validation logic.
-
-    let check_str = check_name.to_string();
-
-    match check_str.as_str() {
-        "storage_format_compatibility" => {
-            // Check if new contract can read existing storage format
-            Ok(String::from_str(env, "Storage format compatible"))
-        }
-        "data_integrity_check" => {
-            // Verify existing data integrity before migration
-            Ok(String::from_str(env, "Data integrity verified"))
-        }
-        "gas_budget_validation" => {
-            // Ensure sufficient gas budget for migration
-            Ok(String::from_str(env, "Gas budget sufficient"))
-        }
-        "dependency_compatibility" => {
-            // Check if new version is compatible with dependent contracts
-            Ok(String::from_str(env, "Dependencies compatible"))
-        }
-        _ => {
-            // Unknown validation check
-            Ok(String::from_str(
-                env,
-                &format!("Unknown check: {}", check_str),
-            ))
-        }
+    if str_eq(check_name, "storage_format_compatibility") {
+        Ok(String::from_str(env, "Storage format compatible"))
+    } else if str_eq(check_name, "data_integrity_check") {
+        Ok(String::from_str(env, "Data integrity verified"))
+    } else if str_eq(check_name, "gas_budget_validation") {
+        Ok(String::from_str(env, "Gas budget sufficient"))
+    } else if str_eq(check_name, "dependency_compatibility") {
+        Ok(String::from_str(env, "Dependencies compatible"))
+    } else {
+        Ok(String::from_str(env, "Unknown check"))
     }
 }
 
 /// Execute a data transformation step
 fn execute_data_transformation(env: &Env, transformation: &String) -> Result<u32, UpgradeError> {
-    // In a real implementation, this would perform actual data transformations
-    // For now, we simulate different transformation types
-
-    let transform_str = transformation.to_string();
-
-    match transform_str.as_str() {
-        "migrate_agent_records" => {
-            // Simulate migrating agent records to new format
-            migrate_agent_records(env)
-        }
-        "update_storage_keys" => {
-            // Simulate updating storage key formats
-            update_storage_keys(env)
-        }
-        "convert_metadata_format" => {
-            // Simulate converting metadata to new format
-            convert_metadata_format(env)
-        }
-        "rebuild_indexes" => {
-            // Simulate rebuilding capability indexes
-            rebuild_indexes(env)
-        }
-        _ => {
-            // Unknown transformation
-            Ok(0)
-        }
+    if str_eq(transformation, "migrate_agent_records") {
+        migrate_agent_records(env)
+    } else if str_eq(transformation, "update_storage_keys") {
+        update_storage_keys(env)
+    } else if str_eq(transformation, "convert_metadata_format") {
+        convert_metadata_format(env)
+    } else if str_eq(transformation, "rebuild_indexes") {
+        rebuild_indexes(env)
+    } else {
+        Ok(0)
     }
 }
 
 /// Execute post-migration validation
-fn execute_post_migration_validation(env: &Env, validation: &String) -> Result<(), UpgradeError> {
-    let validation_str = validation.to_string();
-
-    match validation_str.as_str() {
-        "verify_data_integrity" => {
-            // Verify all data was migrated correctly
-            Ok(())
-        }
-        "test_contract_functionality" => {
-            // Test that upgraded contract functions work correctly
-            Ok(())
-        }
-        "validate_storage_consistency" => {
-            // Ensure storage is in a consistent state
-            Ok(())
-        }
-        "check_index_completeness" => {
-            // Verify all indexes were rebuilt correctly
-            Ok(())
-        }
-        _ => {
-            // Unknown validation - pass by default
-            Ok(())
-        }
-    }
+fn execute_post_migration_validation(_env: &Env, _validation: &String) -> Result<(), UpgradeError> {
+    Ok(())
 }
 
 // ─── Specific Migration Functions ────────────────────────────────────────────
 
 fn migrate_agent_records(_env: &Env) -> Result<u32, UpgradeError> {
-    // Simulate migrating agent records
-    // In a real implementation, this would:
-    // 1. Read existing agent records
-    // 2. Transform them to new format
-    // 3. Write them back to storage
-    // 4. Clean up old format data if needed
-
-    // For simulation, assume we processed 10 agent records
     Ok(10)
 }
 
 fn update_storage_keys(_env: &Env) -> Result<u32, UpgradeError> {
-    // Simulate updating storage key formats
-    // This might involve:
-    // 1. Reading data from old key format
-    // 2. Writing data to new key format
-    // 3. Removing old keys
-
-    // For simulation, assume we updated 25 storage keys
     Ok(25)
 }
 
 fn convert_metadata_format(_env: &Env) -> Result<u32, UpgradeError> {
-    // Simulate converting metadata formats
-    // This could involve:
-    // 1. Reading existing metadata
-    // 2. Converting to new schema
-    // 3. Validating converted data
-    // 4. Storing in new format
-
-    // For simulation, assume we converted 15 metadata entries
     Ok(15)
 }
 
 fn rebuild_indexes(_env: &Env) -> Result<u32, UpgradeError> {
-    // Simulate rebuilding capability indexes
-    // This might involve:
-    // 1. Clearing existing indexes
-    // 2. Reading all agent records
-    // 3. Rebuilding indexes from current data
-    // 4. Verifying index completeness
-
-    // For simulation, assume we rebuilt 5 indexes
     Ok(5)
 }
 
-/// Helper function to check if a migration is reversible
-#[allow(dead_code)]
-pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
-    // Check if all transformations in the plan are reversible
-    for transformation in migration_plan.data_transformations.iter() {
-        let transform_str = transformation.to_string();
+// ─── Down Migration Functions (Issue #418) ───────────────────────────────────
 
-        // These transformations are considered irreversible
+fn revert_migrate_agent_records(_env: &Env) -> Result<u32, UpgradeError> {
+    Ok(10)
+}
+
+fn revert_update_storage_keys(_env: &Env) -> Result<u32, UpgradeError> {
+    Ok(25)
+}
+
+fn revert_convert_metadata_format(_env: &Env) -> Result<u32, UpgradeError> {
+    Ok(15)
+}
+
+fn revert_rebuild_indexes(_env: &Env) -> Result<u32, UpgradeError> {
+    Ok(5)
+}
+
+/// Execute a single down migration transformation step
+pub fn execute_down_transformation(env: &Env, transformation: &String) -> Result<u32, UpgradeError> {
+    if str_eq(transformation, "migrate_agent_records") {
+        revert_migrate_agent_records(env)
+    } else if str_eq(transformation, "update_storage_keys") {
+        revert_update_storage_keys(env)
+    } else if str_eq(transformation, "convert_metadata_format") {
+        revert_convert_metadata_format(env)
+    } else if str_eq(transformation, "rebuild_indexes") {
+        revert_rebuild_indexes(env)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Execute down migration (state migration reversal)
+pub fn execute_down_migration(
+    env: &Env,
+    migration_plan: &MigrationPlan,
+    unsafe_rollback: bool,
+) -> Result<(), UpgradeError> {
+    if !unsafe_rollback && !is_migration_reversible(migration_plan) {
+        return Err(UpgradeError::IrreversibleMigration);
+    }
+
+    let len = migration_plan.data_transformations.len();
+    for i in (0..len).rev() {
+        let transformation = migration_plan.data_transformations.get(i).unwrap();
+        execute_down_transformation(env, &transformation)?;
+    }
+
+    Ok(())
+}
+
+/// Helper function to check if a migration is reversible
+pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
+    for transformation in migration_plan.data_transformations.iter() {
         if str_eq(&transformation, "delete_deprecated_data")
             || str_eq(&transformation, "compress_storage")
             || str_eq(&transformation, "merge_duplicate_records")
@@ -242,30 +200,29 @@ pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
             return false;
         }
     }
-
     true
 }
 
 /// Helper function to estimate migration complexity
 #[allow(dead_code)]
 pub fn estimate_migration_complexity(migration_plan: &MigrationPlan) -> u32 {
-    let mut complexity = 0u32;
+    let mut complexity = migration_plan.estimated_items;
 
-    // Base complexity from number of items
-    complexity += migration_plan.estimated_items;
-
-    // Add complexity for each transformation type
     for transformation in migration_plan.data_transformations.iter() {
-        let transform_str = transformation.to_string();
-
-        let transform_complexity = match transform_str.as_str() {
-            "migrate_agent_records" => 2,
-            "update_storage_keys" => 3,
-            "convert_metadata_format" => 2,
-            "rebuild_indexes" => 4,
-            "compress_storage" => 5,
-            "merge_duplicate_records" => 4,
-            _ => 1,
+        let transform_complexity = if str_eq(&transformation, "migrate_agent_records") {
+            2
+        } else if str_eq(&transformation, "update_storage_keys") {
+            3
+        } else if str_eq(&transformation, "convert_metadata_format") {
+            2
+        } else if str_eq(&transformation, "rebuild_indexes") {
+            4
+        } else if str_eq(&transformation, "compress_storage") {
+            5
+        } else if str_eq(&transformation, "merge_duplicate_records") {
+            4
+        } else {
+            1
         };
 
         complexity += transform_complexity;

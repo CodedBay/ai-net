@@ -46,7 +46,7 @@ describe('Stats API route', () => {
     expect(secondResponse.status).toBe(200);
     expect(firstJson).toEqual(secondJson);
     
-    // getStats executes 6 queries. If cached, it should still be 6.
-    expect(prepareSpy).toHaveBeenCalledTimes(6);
+    // getStats executes 8 queries. If cached, it should still be 8.
+    expect(prepareSpy).toHaveBeenCalledTimes(8);
   });
 });

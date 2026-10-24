@@ -1,0 +1,94 @@
+{
+  "title": "ai-net Log Explorer",
+  "uid": "ai-net-logs",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values(service)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "level",
+        "type": "custom",
+        "options": [
+          { "text": "All",   "value": "" },
+          { "text": "error", "value": "error" },
+          { "text": "warn",  "value": "warn" },
+          { "text": "info",  "value": "info" },
+          { "text": "debug", "value": "debug" }
+        ],
+        "current": { "text": "All", "value": "" },
+        "multi": false,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Log Volume by Service",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "sum by (service, level) (rate({compose_project=\"ai-net\", service=~\"$service\"} |= \"\" [1m]))",
+          "legendFormat": "{{service}} / {{level}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 6 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "colorMode": "background",
+        "thresholds": {
+          "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 1 },
+            { "color": "red", "value": 10 }
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({compose_project=\"ai-net\", level=\"error\"} [5m]))",
+          "legendFormat": "errors / 5m"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Live Logs",
+      "type": "logs",
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "dedupStrategy": "none",
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{compose_project=\"ai-net\", service=~\"$service\"} | json | level=~\"$level\"",
+          "legendFormat": ""
+        }
+      ]
+    }
+  ]
+}

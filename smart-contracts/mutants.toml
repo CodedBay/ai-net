@@ -1,0 +1,33 @@
+# cargo-mutants configuration for ai-net smart contracts
+# Run: cargo mutants -p agent_registry
+# Docs: https://mutants.rs/
+
+# Exclude test modules from mutation — we want to mutate production code only
+exclude_globs = [
+  "contracts/*/src/test.rs",
+  "contracts/*/src/test_*.rs",
+  "contracts/*/src/*_tests.rs",
+  "contracts/*/src/upgrade_tests.rs",
+  "contracts/*/src/audit_tests.rs",
+  "contracts/*/src/bridge_tests.rs",
+  "contracts/*/src/property_tests.rs",
+  "contracts/*/src/test_multisig.rs",
+  "contracts/*/src/pagination_tests.rs",
+  "contracts/*/tests/**/*.rs",
+]
+
+# Focus mutation testing on core agent_registry logic
+include_globs = [
+  "contracts/agent_registry/src/lib.rs",
+  "contracts/agent_registry/src/types.rs",
+  "contracts/agent_registry/src/errors.rs",
+  "contracts/agent_registry/src/events.rs",
+  "contracts/agent_registry/src/audit.rs",
+  "contracts/agent_registry/src/bridge.rs",
+]
+
+# Per-mutant test timeout multiplier (3× the baseline cargo test time)
+timeout_multiplier = 3.0
+
+# Minimum test invocations required per mutant
+minimum_test_count = 1

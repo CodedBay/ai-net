@@ -1,37 +1,34 @@
-/* AgentRegistryCard.module.css */
+/* AgentRegistryCard.module.css — Issue #97 redesign */
 
 /* ── Card container ─────────────────────────────────────────────────────────── */
 .card {
+  position: relative;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 252px;
   padding: 20px;
   border-radius: var(--radius-xl, 16px);
-  border: 1px solid var(--border-color, #e2e8f0);
-  background: var(--surface-glass-subtle, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-color, var(--border-strong));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-primary) 3%, transparent));
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   min-width: 0;
+  overflow: hidden;
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-primary) 3%, transparent));
 }
 
 .card:hover {
   border-color: var(--accent, #3b82f6);
-  box-shadow: 0 4px 24px rgba(59, 130, 246, 0.12);
-  transform: translateY(-2px);
+  box-shadow: 0 6px 28px rgba(59, 130, 246, 0.14);
+  transform: translateY(-3px);
 }
 
-/* ── Header ─────────────────────────────────────────────────────────────────── */
+/* ── Header: avatar + name block ────────────────────────────────────────────── */
 .header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
-}
-
-.nameGroup {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
 }
 
 .avatar {
@@ -39,28 +36,173 @@
   width: 40px;
   height: 40px;
   border-radius: var(--radius-lg, 10px);
-  border: 1px solid var(--border-color, #e2e8f0);
-  background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.08));
+  border: 1px solid var(--border-color, var(--border-strong));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-muted) 8%, transparent));
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent, #3b82f6);
+  color: var(--accent, var(--accent-info));
 }
 
+.nameBlock {
+  min-width: 0;
+  flex: 1;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Name: large and prominent */
 .name {
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 1.1rem;
+  font-weight: 800;
   color: var(--text-main, var(--text-primary));
   margin: 0 0 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
+  line-height: 1.2;
+}
+
+.nameGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.identity {
+  min-width: 0;
+  flex: 1;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.statusOnline {
+  color: var(--status-success-text);
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
+}
+
+.statusOffline {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color, var(--border-strong));
+  border-bottom: 1px solid var(--border-color, var(--border-strong));
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metricLabel {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.metricValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.xlmUnit {
+  color: var(--accent-info);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.hireButton {
+  flex: 1;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--radius-md, 8px);
+  background: var(--accent-info);
+  color: var(--text-inverse);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hireButton:hover:not(:disabled) {
+  background: var(--primary-hover, var(--accent-info));
+}
+
+.hireButtonDisabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.compareButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.compareButtonSelected {
+  color: var(--text-inverse);
+  border-color: var(--accent-info);
+  background: var(--accent-info);
+}
+
+.compareButton:focus-visible,
+.hireButton:focus-visible {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 2px;
 }
 
 .agentId {
   font-family: var(--font-mono, monospace);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--text-muted, #64748b);
   background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.1));
   padding: 1px 5px;
@@ -68,52 +210,29 @@
   letter-spacing: 0.02em;
 }
 
-/* ── Status badge ───────────────────────────────────────────────────────────── */
-.statusBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  white-space: nowrap;
-  text-transform: capitalize;
-}
-
-.statusOnline {
-  background: rgba(52, 211, 153, 0.12);
-  color: #10b981;
-  border: 1px solid rgba(52, 211, 153, 0.3);
-}
-
-.statusOffline {
-  background: rgba(148, 163, 184, 0.1);
-  color: var(--text-muted, #64748b);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-}
-
+/* ── Status dot — subtle, next to name ──────────────────────────────────────── */
 .statusDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
   flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-bottom: 3px; /* optical alignment with text baseline */
 }
 
-.statusOnline .statusDot {
+.statusDotOnline {
   background: #10b981;
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
   animation: pulse 2s ease-in-out infinite;
 }
 
-.statusOffline .statusDot {
-  background: var(--text-muted, #64748b);
+.statusDotOffline {
+  background: var(--text-muted, #94a3b8);
 }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50%       { opacity: 0.35; }
 }
 
 /* ── Capability pills ───────────────────────────────────────────────────────── */
@@ -121,12 +240,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 24px;
+  min-height: 22px;
 }
 
 .pill {
   display: inline-block;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -135,91 +254,101 @@
   border: 1px solid transparent;
 }
 
+/* research = blue */
 .pill--blue {
-  background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
-  border-color: rgba(96, 165, 250, 0.3);
+  background: color-mix(in srgb, var(--accent-info) 15%, transparent);
+  color: var(--accent-info);
+  border-color: color-mix(in srgb, var(--accent-info) 30%, transparent);
 }
 
-.pill--yellow {
-  background: rgba(251, 191, 36, 0.15);
-  color: #f59e0b;
-  border-color: rgba(251, 191, 36, 0.3);
-}
-
-.pill--green {
-  background: rgba(52, 211, 153, 0.15);
-  color: #10b981;
-  border-color: rgba(52, 211, 153, 0.3);
-}
-
-.pill--purple {
-  background: rgba(192, 132, 252, 0.15);
-  color: #a78bfa;
-  border-color: rgba(192, 132, 252, 0.3);
-}
-
-.pill--red {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.3);
-}
-
+/* risk / audit = orange */
 .pill--orange {
   background: rgba(251, 146, 60, 0.15);
   color: #fb923c;
   border-color: rgba(251, 146, 60, 0.3);
 }
 
+/* coding = green */
+.pill--green {
+  background: color-mix(in srgb, var(--status-success) 15%, transparent);
+  color: var(--status-success-text);
+  border-color: color-mix(in srgb, var(--status-success) 30%, transparent);
+}
+
+/* design = purple */
+.pill--purple {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* report = red */
+.pill--red {
+  background: color-mix(in srgb, var(--status-danger) 15%, transparent);
+  color: var(--status-danger-text);
+  border-color: color-mix(in srgb, var(--status-danger) 30%, transparent);
+}
+
+/* yellow kept for legacy compatibility */
+.pill--yellow {
+  background: rgba(251, 191, 36, 0.15);
+  color: #f59e0b;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
 .pill--default {
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--text-muted, #64748b);
-  border-color: rgba(148, 163, 184, 0.2);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--text-muted) 20%, transparent);
 }
 
 .noCaps {
   font-size: 0.8rem;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   font-style: italic;
 }
 
-/* ── Metrics row ────────────────────────────────────────────────────────────── */
-.metrics {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
+/* ── Price block ────────────────────────────────────────────────────────────── */
+.priceBlock {
+  padding: 10px 0 8px;
   border-top: 1px solid var(--border-color, #e2e8f0);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
 
-.metric {
+.priceMain {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: baseline;
+  gap: 4px;
 }
 
-.metricLabel {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted, #64748b);
-}
-
-.metricValue {
-  font-size: 0.9rem;
+/* Large, prominent price */
+.priceAmount {
+  font-size: 1.5rem;
+  font-weight: 800;
   color: var(--text-main, var(--text-primary));
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
-.xlmUnit {
+.priceUnit {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent, #3b82f6);
+  letter-spacing: 0.04em;
+}
+
+.priceUsd {
   font-size: 0.75rem;
   color: var(--text-muted, #64748b);
-  font-weight: 400;
+  margin-top: 2px;
+  display: block;
 }
 
-/* ── Reputation stars ───────────────────────────────────────────────────────── */
+/* ── Reputation row ─────────────────────────────────────────────────────────── */
+.reputationRow {
+  display: flex;
+  align-items: center;
+}
+
 .stars {
   display: inline-flex;
   align-items: center;
@@ -227,53 +356,165 @@
 }
 
 .starFilled {
-  color: #f59e0b;
-  fill: #f59e0b;
+  color: var(--status-warning-text);
+  fill: var(--status-warning-text);
 }
 
 .starEmpty {
-  color: var(--border-color, #e2e8f0);
+  color: var(--border-color, var(--text-muted));
   fill: none;
 }
 
 .reputationValue {
   font-size: 0.78rem;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Hire button ────────────────────────────────────────────────────────────── */
-.hireButton {
+/* ── Hire CTA — hidden by default, revealed on card hover ───────────────────── */
+.hireCta {
   width: 100%;
   padding: 10px;
   border-radius: var(--radius-lg, 10px);
   border: none;
-  background: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--accent, var(--accent-info));
+  color: var(--text-inverse);
   font-size: 0.9rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
   margin-top: auto;
+
+  /* Hidden by default */
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.15s ease;
 }
 
-.hireButton:hover:not(:disabled) {
-  background: #2563eb;
-  transform: translateY(-1px);
+/* Revealed when the card is hovered */
+.card:hover .hireCta {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.hireButton:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.hireButton:focus-visible {
+/* Also show when button itself has focus (keyboard navigation) */
+.hireCta:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
   outline: 2px solid var(--accent, #3b82f6);
   outline-offset: 2px;
 }
 
-.hireButtonDisabled {
+.hireCta:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.hireCta:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.hireCta:disabled {
   background: var(--text-muted, #64748b);
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0;
+}
+
+@media (max-width: 767px) {
+  .card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'avatar identity status'
+      'avatar capabilities price'
+      'actions actions actions';
+    align-items: center;
+    gap: 8px 10px;
+    min-height: 132px;
+    padding: 14px;
+    touch-action: pan-y;
+  }
+
+  .header,
+  .nameGroup,
+  .metrics {
+    display: contents;
+  }
+
+  .avatar {
+    grid-area: avatar;
+    width: 40px;
+    height: 40px;
+  }
+
+  .identity {
+    grid-area: identity;
+  }
+
+  .name {
+    max-width: 100%;
+    margin-bottom: 2px;
+    font-size: 0.98rem;
+  }
+
+  .agentId {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .statusBadge {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .capabilities {
+    grid-area: capabilities;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .pill {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .metric:first-child {
+    grid-area: price;
+    align-items: flex-end;
+    padding: 0;
+    border: 0;
+  }
+
+  .metric:first-child .metricLabel {
+    display: none;
+  }
+
+  .metric:nth-child(2) {
+    display: none;
+  }
+
+  .metricValue {
+    font-size: 0.8rem;
+  }
+
+  .cardActions {
+    grid-area: actions;
+    width: 100%;
+  }
+
+  .compareButton {
+    display: inline-flex;
+  }
+}
+
+/* Disabled hire CTA is also revealed on hover, but visually muted */
+.card:hover .hireCta:disabled {
+  opacity: 0.5;
+  transform: translateY(0);
 }

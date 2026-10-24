@@ -4,10 +4,11 @@ import { useTranslation } from 'react-i18next'
 import { AnimatePresence } from 'framer-motion'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { useWallet } from '../../context/WalletContext'
+import { useAgentStatusSocket } from '../../hooks/useAgentStatusSocket'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import MobileDrawer from './MobileDrawer'
-import Breadcrumb from './Breadcrumb'
+import Breadcrumb, { BreadcrumbContext } from './Breadcrumb'
 import Footer from '../landing/Footer'
 import './AppShell.css'
 
@@ -58,9 +59,13 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const { publicKey } = useWallet()
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarState(publicKey))
+  const [breadcrumbPageLabel, setBreadcrumbPageLabel] = useState<{ pathname: string; label: string } | null>(null)
   const location = useLocation()
   const navigate = useNavigate()
   const drawerRef = useRef<HTMLDivElement>(null)
+
+  // Agent-status real-time updates — connection state fed to TopNav indicator.
+  const { connectionState: wsConnectionState } = useAgentStatusSocket()
 
   // Re-read when the identity changes, so connecting a wallet adopts that
   // wallet's saved preference instead of carrying over the anonymous one.
@@ -118,6 +123,10 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
     setIsDrawerOpen((prev) => !prev)
   }, [])
 
+  const publishBreadcrumbPageLabel = useCallback((pathname: string, label: string) => {
+    setBreadcrumbPageLabel({ pathname, label })
+  }, [])
+
   const handleNavigate = useCallback(
     (path: string) => {
       navigate(path)
@@ -138,6 +147,7 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
         sidebarCollapsed={sidebarCollapsed}
         isMobile={isMobile}
         isDrawerOpen={isDrawerOpen}
+        wsConnectionState={wsConnectionState}
       />
 
       {!isMobile && (
@@ -164,10 +174,12 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
         className={`main-content ${!isMobile && sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
         tabIndex={-1}
       >
-        <Breadcrumb />
-        <div className="main-content-body">
-          {children}
-        </div>
+        <BreadcrumbContext.Provider value={{ pageLabel: breadcrumbPageLabel, setPageLabel: publishBreadcrumbPageLabel }}>
+          <Breadcrumb />
+          <div className="main-content-body">
+            {children}
+          </div>
+        </BreadcrumbContext.Provider>
         <Footer />
       </main>
     </div>

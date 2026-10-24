@@ -1,0 +1,13 @@
+# ZAP Rules Configuration
+# Format: <rule-id><TAB><action><TAB><parameter>
+# Actions: IGNORE, WARN, FAIL
+#
+# Suppress known informational / low-signal alerts that generate noise
+# in the ai-net backend context.
+
+10015	IGNORE	(Incomplete or No Cache-control Header Set)
+10096	IGNORE	(Timestamp Disclosure - Unix)
+10036	IGNORE	(Server Leaks Version Information via "Server" HTTP Response Header Field)
+10021	IGNORE	(X-Content-Type-Options Header Missing)
+10038	IGNORE	(Content Security Policy (CSP) Header Not Set)
+90022	IGNORE	(Application Error Disclosure)

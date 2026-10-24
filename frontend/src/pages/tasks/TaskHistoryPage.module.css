@@ -73,7 +73,7 @@
 }
 
 .compareBtn:active {
-  background: var(--primary-active, #6d28d9);
+  background: var(--primary-active, var(--accent));
   transform: scale(0.96);
 }
 
@@ -105,7 +105,7 @@
 }
 
 .clearBtn:active {
-  background: rgba(139, 92, 246, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   transform: scale(0.95);
 }
 
@@ -154,7 +154,7 @@
 }
 
 .retryButton:active {
-  background: rgba(239, 68, 68, 0.35);
+  background: color-mix(in srgb, var(--status-danger) 35%, transparent);
   transform: scale(0.96);
 }
 

@@ -5,11 +5,13 @@
  *  - Standard rate-limit headers on every allowed response
  *  - 429 JSON body, Retry-After, and zeroed Remaining on exhaustion
  *  - Rolling window: older timestamps expire and new requests are accepted
- *  - Distinct limits across public / authed / admin groups
- *  - createPublicLimiter / createAuthedLimiter / createAdminLimiter respect env vars
+ *  - Distinct limits across public / authed / admin / veniceProxy groups
+ *  - createPublicLimiter / createAuthedLimiter / createAdminLimiter / createVeniceProxyLimiter
+ *    respect env vars
+ *  - Per-wallet keying for authenticated and Venice proxy tiers
+ *  - Violation logging at WARN level
  */
 
-import { createServer } from "http";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import {
@@ -17,12 +19,14 @@ import {
   createPublicLimiter,
   createAuthedLimiter,
   createAdminLimiter,
+  createVeniceProxyLimiter,
+  extractRateLimitKey,
 } from "./rateLimit";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildApp(maxRequests: number, windowMs = 60_000) {
-  const limiter = createRateLimiter({ maxRequests, windowMs });
+function buildApp(maxRequests: number, windowMs = 60_000, useWalletKey = false) {
+  const limiter = createRateLimiter({ maxRequests, windowMs }, useWalletKey);
   const app = express();
   app.use(limiter.middleware);
   app.get("/ping", (_req: Request, res: Response) => res.json({ ok: true }));
@@ -69,7 +73,7 @@ describe("429 when limit is exhausted", () => {
     const res = await request(app).get("/ping"); // 3 — should be blocked
 
     expect(res.status).toBe(429);
-    expect(res.body.error.code).toBe("RATE_LIMITED");
+    expect(res.body.error.code).toBe("RATE_LIMIT_EXCEEDED");
     expect(res.body.error.message).toMatch(/too many requests/i);
   });
 
@@ -132,7 +136,7 @@ describe("sliding window expiry", () => {
 // ── stop() clears state ───────────────────────────────────────────────────────
 
 describe("stop()", () => {
-  it("clears tracked IPs so requests are allowed again", async () => {
+  it("clears tracked keys so requests are allowed again", async () => {
     const { app, limiter } = buildApp(1);
     await request(app).get("/ping"); // fills the slot
     const blocked = await request(app).get("/ping");
@@ -153,14 +157,14 @@ describe("stop()", () => {
 // ── Per-group factories read from env ─────────────────────────────────────────
 
 describe("createPublicLimiter", () => {
-  it("defaults to 120 requests per minute", async () => {
+  it("defaults to 100 requests per minute", async () => {
     const limiter = createPublicLimiter();
     const app = express();
     app.use(limiter.middleware);
     app.get("/ping", (_req, res) => res.json({ ok: true }));
 
     const res = await request(app).get("/ping");
-    expect(res.headers["x-ratelimit-limit"]).toBe("120");
+    expect(res.headers["x-ratelimit-limit"]).toBe("100");
   });
 
   it("respects RATE_LIMIT_PUBLIC_MAX_REQUESTS env override", async () => {
@@ -203,33 +207,143 @@ describe("createAdminLimiter", () => {
   });
 });
 
+describe("createVeniceProxyLimiter", () => {
+  it("defaults to 10 requests per minute", async () => {
+    const limiter = createVeniceProxyLimiter();
+    const app = express();
+    app.use(limiter.middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get("/ping");
+    expect(res.headers["x-ratelimit-limit"]).toBe("10");
+  });
+
+  it("respects RATE_LIMIT_VENICE_PROXY_MAX_REQUESTS env override", async () => {
+    process.env.RATE_LIMIT_VENICE_PROXY_MAX_REQUESTS = "3";
+    try {
+      const limiter = createVeniceProxyLimiter();
+      const app = express();
+      app.use(limiter.middleware);
+      app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+      const res = await request(app).get("/ping");
+      expect(res.headers["x-ratelimit-limit"]).toBe("3");
+    } finally {
+      delete process.env.RATE_LIMIT_VENICE_PROXY_MAX_REQUESTS;
+    }
+  });
+
+  it("returns 429 after 10 requests from the same wallet", async () => {
+    const limiter = createVeniceProxyLimiter();
+    const app = express();
+    app.use(limiter.middleware);
+    app.post("/api/tasks", (_req, res) => res.json({ ok: true }));
+
+    const walletKey = "GABCDE1234567890ABCDE1234567890ABCDE1234567890ABCDE1234567890";
+    for (let i = 0; i < 10; i++) {
+      await request(app).post("/api/tasks").set("walletpublickey", walletKey);
+    }
+    const res = await request(app)
+      .post("/api/tasks")
+      .set("walletpublickey", walletKey);
+
+    expect(res.status).toBe(429);
+    expect(res.body.error.code).toBe("RATE_LIMIT_EXCEEDED");
+    expect(res.headers["retry-after"]).toBeDefined();
+  });
+});
+
+// ── Per-wallet keying ─────────────────────────────────────────────────────────
+
+describe("per-wallet keying", () => {
+  it("counts requests separately per wallet address", async () => {
+    // Limit of 2 per wallet
+    const limiter = createRateLimiter({ maxRequests: 2 }, true);
+    const app = express();
+    app.use(limiter.middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+    const wallet1 = "GABCDE111111111111111111111111111111111111111111111111111111";
+    const wallet2 = "GABCDE222222222222222222222222222222222222222222222222222222";
+
+    // Use up wallet1's budget
+    await request(app).get("/ping").set("walletpublickey", wallet1);
+    await request(app).get("/ping").set("walletpublickey", wallet1);
+    const blocked = await request(app).get("/ping").set("walletpublickey", wallet1);
+    expect(blocked.status).toBe(429);
+
+    // wallet2 should still be allowed
+    const allowed = await request(app).get("/ping").set("walletpublickey", wallet2);
+    expect(allowed.status).toBe(200);
+  });
+
+  it("falls back to IP key when no wallet header is present", async () => {
+    const limiter = createRateLimiter({ maxRequests: 5 }, true);
+    const app = express();
+    app.use(limiter.middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get("/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe("5");
+  });
+});
+
+// ── extractRateLimitKey ───────────────────────────────────────────────────────
+
+describe("extractRateLimitKey", () => {
+  it("returns wallet-prefixed key when useWallet=true and header is present", () => {
+    const req = {
+      ip: "127.0.0.1",
+      headers: { walletpublickey: "GABC123" },
+    } as unknown as Request;
+    expect(extractRateLimitKey(req, true)).toBe("wallet:GABC123");
+  });
+
+  it("falls back to IP key when useWallet=true but no wallet header", () => {
+    const req = { ip: "10.0.0.1", headers: {} } as unknown as Request;
+    expect(extractRateLimitKey(req, true)).toBe("ip:10.0.0.1");
+  });
+
+  it("always returns IP key when useWallet=false", () => {
+    const req = {
+      ip: "192.168.1.1",
+      headers: { walletpublickey: "GABC999" },
+    } as unknown as Request;
+    expect(extractRateLimitKey(req, false)).toBe("ip:192.168.1.1");
+  });
+
+  it("returns ip:unknown when no IP or wallet", () => {
+    const req = { ip: undefined, headers: {} } as unknown as Request;
+    expect(extractRateLimitKey(req, true)).toBe("ip:unknown");
+  });
+});
+
 // ── Group limits differ ───────────────────────────────────────────────────────
 
 describe("group limits are distinct from each other", () => {
-  it("public > authed > admin by default", () => {
-    const publicLimit = 120;
-    const authedLimit = 30;
-    const adminLimit = 20;
-    expect(publicLimit).toBeGreaterThan(authedLimit);
-    expect(authedLimit).toBeGreaterThan(adminLimit);
+  it("public(100) > authed(30) > admin(20) > veniceProxy(10) by default", () => {
+    expect(100).toBeGreaterThan(30);
+    expect(30).toBeGreaterThan(20);
+    expect(20).toBeGreaterThan(10);
   });
 
-  it("public limiter allows 120 while admin only allows 20", async () => {
+  it("public limiter allows 100 while veniceProxy only allows 10", async () => {
     const pubLimiter = createPublicLimiter();
-    const admLimiter = createAdminLimiter();
+    const veniceLimiter = createVeniceProxyLimiter();
 
     const pubApp = express();
     pubApp.use(pubLimiter.middleware);
     pubApp.get("/ping", (_req, res) => res.json({ ok: true }));
 
-    const admApp = express();
-    admApp.use(admLimiter.middleware);
-    admApp.get("/ping", (_req, res) => res.json({ ok: true }));
+    const veniceApp = express();
+    veniceApp.use(veniceLimiter.middleware);
+    veniceApp.get("/ping", (_req, res) => res.json({ ok: true }));
 
     const pubRes = await request(pubApp).get("/ping");
-    const admRes = await request(admApp).get("/ping");
+    const veniceRes = await request(veniceApp).get("/ping");
 
-    expect(pubRes.headers["x-ratelimit-limit"]).toBe("120");
-    expect(admRes.headers["x-ratelimit-limit"]).toBe("20");
+    expect(pubRes.headers["x-ratelimit-limit"]).toBe("100");
+    expect(veniceRes.headers["x-ratelimit-limit"]).toBe("10");
   });
 });

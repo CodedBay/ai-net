@@ -27,6 +27,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # its entry points; the wasm build above does not.
 upgrade-manager = { path = "../upgrade-manager", features = ["contract"] }
 
+[features]
+# Enable gas-cost benchmark tests.  Run with:
+#   cargo test --features benchmarks -- benchmark --nocapture
+benchmarks = []
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

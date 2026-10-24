@@ -37,20 +37,45 @@ export const handlers = [
     })
   }),
 
-  http.get('/api/tasks/:id', ({ params }) => {
+  http.get('/api/tasks/:id', ({ params, request }) => {
     const { id } = params
+    // Visual regression tests can override the status via a URL query param
+    // (?__task_status=failed) so the spec can capture each state without
+    // needing a real backend. The override is only checked in visual tests;
+    // functional e2e tests never set this param.
+    const url = new URL(request.url)
+    const statusOverride = url.searchParams.get('__task_status')
+    const status = statusOverride ?? 'running'
     return HttpResponse.json({
       taskId: id,
       prompt: 'Build a decentralized agent network testing suite.',
       walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
-      status: 'running',
+      status,
       dag: [
-        { nodeId: 'node-research', agentType: 'research', prompt: 'Research Agent', dependsOn: [], status: 'running' },
+        { nodeId: 'node-research', agentType: 'research', prompt: 'Research Agent', dependsOn: [], status: status === 'pending' ? 'pending' : 'running' },
         { nodeId: 'node-coding', agentType: 'coding', prompt: 'Code Generator', dependsOn: ['node-research'], status: 'pending' },
         { nodeId: 'node-report', agentType: 'report', prompt: 'Report Writer', dependsOn: ['node-coding'], status: 'pending' },
       ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: new Date('2026-08-01T10:00:00.000Z').toISOString(),
+      updatedAt: new Date('2026-08-01T10:05:00.000Z').toISOString(),
+    })
+  }),
+
+  // Agent detail endpoint — used by the AgentDetailModal in visual regression tests.
+  http.get('/api/agents/:id', ({ params }) => {
+    const { id } = params
+    return HttpResponse.json({
+      id,
+      name: 'Research Specialist',
+      capabilities: ['research', 'report', 'summarization'],
+      price: 0.5,
+      reputation: 4.8,
+      status: 'active',
+      description: 'Specialized in data gathering and market research using multi-source synthesis.',
+      walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
+      totalTasksCompleted: 142,
+      averageResponseTime: 4200,
+      registeredAt: new Date('2026-01-15T08:00:00.000Z').toISOString(),
     })
   }),
 

@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, RequestHandler } from "express";
 import { getConfig } from "../../config";
 import { adminAuthMiddleware } from "../middleware/auth";
 import { metricsService } from "../../services/metrics";
@@ -7,25 +7,60 @@ import { tracingService } from "../../services/tracing";
 const router = Router();
 const startTime = Date.now();
 
-function cachedRoute(group: "health"): RequestHandler {
-  let middleware: RequestHandler | null = null;
-  return (req, res, next) => {
-    if (!middleware) {
-      middleware = cacheMiddleware({ ttl: ttlForRoute(group) });
-    }
-    return middleware(req, res, next);
-  };
+/**
+ * Set to true by the graceful shutdown handler before closing connections.
+ * When draining, `GET /health` returns `{ status: "draining" }` so load
+ * balancers know to stop sending new traffic.
+ */
+let _isDraining = false;
+
+/** Mark the server as entering the drain window (called by shutdown handler). */
+export function setDraining(value: boolean): void {
+  _isDraining = value;
 }
 
-router.get("/", cachedRoute("health"), (_req: Request, res: Response) => {
+/** Returns true when the server is in the drain window. */
+export function isDraining(): boolean {
+  return _isDraining;
+}
+
+/**
+ * @openapi
+ * /health:
+ *   get:
+ *     summary: Basic liveness check
+ *     operationId: getHealth
+ *     description: Returns process uptime, version, and Stellar network name. No external dependency checks.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Service is up
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthStatus'
+ */
+const livenessHandler: RequestHandler = (_req: Request, res: Response) => {
   const config = getConfig();
+  if (_isDraining) {
+    // During shutdown: return 503 so load balancers stop sending new traffic,
+    // while the drain window allows in-flight requests to finish.
+    res.status(503).json({
+      status: "draining",
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      version: config.NPM_PACKAGE_VERSION,
+      stellarNetwork: config.STELLAR_NETWORK,
+    });
+    return;
+  }
   res.json({
     status: "ok",
     uptime: Math.floor((Date.now() - startTime) / 1000),
     version: config.NPM_PACKAGE_VERSION,
     stellarNetwork: config.STELLAR_NETWORK,
   });
-}
+};
 
 router.get("/", livenessHandler);
 
@@ -41,10 +76,49 @@ router.get("/", livenessHandler);
  *     responses:
  *       200:
  *         description: Service is up
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthStatus'
  */
 router.get("/live", livenessHandler);
 
-router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) => {
+/**
+ * @openapi
+ * /health/deep:
+ *   get:
+ *     summary: Deep dependency health check
+ *     operationId: getDeepHealth
+ *     description: >
+ *       Probes external dependencies (Venice AI, Stellar Horizon) and reports
+ *       their individual status. Always returns 200 — dependency degradation
+ *       is reported in the body (`status: "degraded"`) rather than as an HTTP
+ *       failure, so diagnostic consumers can read full details. Readiness for
+ *       traffic lives on `/health/ready`.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Dependency status report (ok or degraded)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [status, services]
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [ok, degraded]
+ *                   example: degraded
+ *                 services:
+ *                   type: object
+ *                   properties:
+ *                     venice: { type: string, enum: [ok, error, unknown], example: error }
+ *                     horizon: { type: string, enum: [ok, error, unknown], example: ok }
+ *                 venice: { type: string, enum: [ok, error, unknown], example: error }
+ *                 horizon: { type: string, enum: [ok, error, unknown], example: ok }
+ */
+router.get("/deep", async (_req: Request, res: Response) => {
   const config = getConfig();
   const [veniceStatus, horizonStatus] = await Promise.all([
     checkVenice(config.VENICE_API_KEY),
@@ -52,7 +126,10 @@ router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) 
   ]);
 
   const allOk = veniceStatus === "ok" && horizonStatus === "ok";
-  res.status(allOk ? 200 : 503).json({
+  // Deep health is a diagnostic report, not a readiness gate: always 200 so
+  // degraded dependencies surface in the body (`status: "degraded"`) without
+  // being treated as an outage. Readiness lives on /health/ready.
+  res.status(200).json({
     status: allOk ? "ok" : "degraded",
     services: {
       venice: veniceStatus,
@@ -63,6 +140,32 @@ router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) 
   });
 });
 
+/**
+ * @openapi
+ * /health/ready:
+ *   get:
+ *     summary: Readiness probe
+ *     operationId: getReady
+ *     description: >
+ *       Returns 200 when every dependency check passes (task DB, payment DB,
+ *       queue, Venice AI, Horizon, WebSocket server) and 500 otherwise, so
+ *       orchestrators can gate traffic on readiness.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: All dependencies ready
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessStatus'
+ *       500:
+ *         description: One or more dependencies failing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessStatus'
+ */
 router.get("/ready", async (_req: Request, res: Response) => {
   const checks: Record<string, "ok" | "error" | "unknown"> = {
     tasks: "ok",

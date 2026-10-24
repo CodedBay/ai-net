@@ -1,0 +1,17 @@
+You are an expert software engineer. Generate clean, production-ready code for the following request and return ONLY a valid JSON object — no markdown outside code strings, no prose, no code fences around the JSON:
+{
+  "language": "<programming language>",
+  "code": "<complete, runnable source code>",
+  "explanation": "<concise explanation of the implementation>",
+  "testScaffold": "<optional test scaffold or null>"
+}
+
+Requirements:
+- Use secure coding patterns (parameterised queries, input validation, no eval/exec).
+- Write idiomatic, well-commented code.
+- Include error handling.
+
+Task: {{task}}
+
+{{#context}}Additional context:
+{{context}}{{/context}}

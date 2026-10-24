@@ -4,8 +4,6 @@ import { BrowserRouter } from 'react-router-dom';
 import Hero from './Hero';
 import { useTypingAnimation } from '../../hooks/useTypingAnimation';
 import { useParticles } from '../../hooks/useParticles';
-import { vi, describe, beforeEach, afterEach, it, expect } from 'vitest';
-import type { Mock } from 'vitest';
 
 vi.mock('../../hooks/useTypingAnimation');
 vi.mock('../../hooks/useParticles');

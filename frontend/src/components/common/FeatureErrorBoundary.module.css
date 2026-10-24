@@ -1,0 +1,68 @@
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--status-danger, #dc2626);
+  border-radius: 0.5rem;
+  background: var(--surface-panel, #fff);
+  color: var(--text-primary, #17212b);
+  box-sizing: border-box;
+}
+
+.card:focus {
+  outline: 3px solid var(--accent-primary, #0f766e);
+  outline-offset: 3px;
+}
+
+.title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.message {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary, #475569);
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.retry,
+.report {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.retry {
+  border: 0;
+  background: var(--accent-primary, #0f766e);
+  color: #fff;
+  cursor: pointer;
+}
+
+.report {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary, #475569);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+@media (max-width: 36rem) {
+  .card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

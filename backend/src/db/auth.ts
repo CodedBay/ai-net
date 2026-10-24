@@ -117,6 +117,13 @@ export function getAuthDb(dbPath?: string): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_auth_tokens_familyId ON auth_refresh_tokens(familyId);
       CREATE INDEX IF NOT EXISTS idx_auth_tokens_sessionId ON auth_refresh_tokens(sessionId);
 
+      CREATE TABLE IF NOT EXISTS auth_wallet_nonces (
+        nonce TEXT PRIMARY KEY,
+        expiresAt TEXT NOT NULL,
+        consumedAt TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_auth_wallet_nonces_expiry ON auth_wallet_nonces(expiresAt);
+
       CREATE TABLE IF NOT EXISTS auth_audit_logs (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp       TEXT NOT NULL,
@@ -162,6 +169,10 @@ export interface AuthDb {
   revokeTokensByFamily(familyId: string, revokedAt: string): void;
   revokeTokensBySession(sessionId: string, revokedAt: string): void;
   revokeTokensByUser(walletPublicKey: string, revokedAt: string): void;
+
+  // Wallet-signature challenge operations
+  createWalletNonce(nonce: string, expiresAt: string): void;
+  consumeWalletNonce(nonce: string, now: string): boolean;
 
   // Audit log operations
   insertAuditLog(log: AuthAuditLog): void;
@@ -238,6 +249,18 @@ export function createAuthDb(db: Database.Database): AuthDb {
     SET isConsumed = 1, consumedAt = ?, replacedByTokenHash = ?
     WHERE tokenHash = ?
   `);
+
+  const insertWalletNonceStmt = db.prepare(
+    "INSERT INTO auth_wallet_nonces (nonce, expiresAt) VALUES (?, ?)",
+  );
+  const consumeWalletNonceStmt = db.prepare(`
+    UPDATE auth_wallet_nonces
+    SET consumedAt = ?
+    WHERE nonce = ? AND consumedAt IS NULL AND expiresAt > ?
+  `);
+  const deleteExpiredWalletNoncesStmt = db.prepare(
+    "DELETE FROM auth_wallet_nonces WHERE expiresAt <= ?",
+  );
 
   const revokeTokensByFamilyStmt = db.prepare(`
     UPDATE auth_refresh_tokens
@@ -320,6 +343,15 @@ export function createAuthDb(db: Database.Database): AuthDb {
 
     revokeTokensByUser(walletPublicKey: string, revokedAt: string): void {
       revokeTokensByUserStmt.run(revokedAt, walletPublicKey);
+    },
+
+    createWalletNonce(nonce: string, expiresAt: string): void {
+      deleteExpiredWalletNoncesStmt.run(new Date().toISOString());
+      insertWalletNonceStmt.run(nonce, expiresAt);
+    },
+
+    consumeWalletNonce(nonce: string, now: string): boolean {
+      return consumeWalletNonceStmt.run(now, nonce, now).changes === 1;
     },
 
     insertAuditLog(log: AuthAuditLog): void {

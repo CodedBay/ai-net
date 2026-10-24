@@ -6,6 +6,7 @@ import { createLogger } from "../utils/logger";
 import { migrateToLatest } from "./migrator";
 import { createPool, type SqlitePool } from "./pool";
 import { decodeCursor, encodeCursor, type CursorPage } from "./cursor";
+import { poolSettings } from "./poolConfig";
 
 const logger = createLogger({ component: "task-db" });
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "tasks");
@@ -18,9 +19,7 @@ export function getTaskPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "tasks.db");
     _taskPool = createPool({
       filePath,
-      min: 1,
-      max: 4,
-      acquireTimeoutMs: 5_000,
+      ...poolSettings(),
       onCreate: (db) => {
         try {
           (db as any).on("error", (err: Error) => {
@@ -64,6 +63,23 @@ export interface TaskEvent {
   timestamp: string;
 }
 
+export interface StoredTaskResult {
+  result: string | null;
+  resultFile: string | null;
+  resultExpiresAt: string | null;
+  resultEncoding: "identity" | "gzip";
+  resultStatus: "inline" | "archived" | "expired";
+  resultSummary: string | null;
+  resultArchiveKey: string | null;
+  resultArchiveAt: string | null;
+}
+
+export interface ExpiredTaskResult {
+  id: string;
+  resultFile: string | null;
+  resultArchiveKey?: string | null;
+}
+
 export interface TaskListOptions {
   status?: string;
   q?: string;
@@ -101,11 +117,35 @@ export interface TaskDb {
   ): CursorPage<Task>;
   updateStatus(id: string, status: TaskStatus): void;
   updateDagJson(id: string, dagJson: string): void;
+  saveResult(
+    id: string,
+    result: string,
+    resultFile: string | null,
+    expiresAt: string,
+    options?: { encoding?: "identity" | "gzip"; summary?: string; archiveAt?: string },
+  ): void;
+  getResult(id: string): StoredTaskResult | undefined;
+  listResultsToArchive(before: string): ExpiredTaskResult[];
+  markResultArchived(id: string, archiveKey: string): void;
+  listExpiredResults(before: string): ExpiredTaskResult[];
+  clearResult(id: string): void;
   insertEvent(event: TaskEvent): void;
   getEventHistory(taskId: string): TaskEvent[];
   failRunningTasks(): void;
   insertQualityScore(record: QualityScoreRecord): void;
-  listQualityScores(agentId?: string, limit?: number): QualityScoreRecord[];
+  listQualityScores(agentId?: string, limit?: number, since?: string): QualityScoreRecord[];
+}
+
+function taskFromRow(row: any): Task {
+  delete row.result;
+  delete row.resultFile;
+  delete row.resultExpiresAt;
+  delete row.resultEncoding;
+  delete row.resultStatus;
+  delete row.resultSummary;
+  delete row.resultArchiveKey;
+  delete row.resultArchiveAt;
+  return { ...row, dag: JSON.parse(row.dagJson) };
 }
 
 export function createTaskDb(db: Database.Database): TaskDb {
@@ -125,10 +165,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
     findById(id: string): Task | undefined {
       const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
       if (!row) return undefined;
-      return {
-        ...row,
-        dag: JSON.parse(row.dagJson),
-      };
+      return taskFromRow(row);
     },
 
     list(
@@ -163,10 +200,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
         )
         .all(...params, pageSize, offset) as any[];
 
-      const tasks: Task[] = rows.map((row) => ({
-        ...row,
-        dag: JSON.parse(row.dagJson),
-      }));
+      const tasks: Task[] = rows.map(taskFromRow);
 
       const { total } = db
         .prepare(`SELECT COUNT(*) as total FROM tasks WHERE ${whereClause}`)
@@ -222,10 +256,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
       const hasMore = rows.length > limit;
       const pageRows = hasMore ? rows.slice(0, limit) : rows;
 
-      const tasks: Task[] = pageRows.map((row) => ({
-        ...row,
-        dag: JSON.parse(row.dagJson),
-      }));
+      const tasks: Task[] = pageRows.map(taskFromRow);
 
       const result: CursorPage<Task> = { items: tasks };
       if (hasMore) {
@@ -247,6 +278,60 @@ export function createTaskDb(db: Database.Database): TaskDb {
       db.prepare(
         "UPDATE tasks SET dagJson = ?, updatedAt = ? WHERE id = ?",
       ).run(dagJson, new Date().toISOString(), id);
+    },
+
+    saveResult(id: string, result: string, resultFile: string | null, expiresAt: string, options = {}): void {
+      db.prepare(
+        `UPDATE tasks
+         SET result = ?, resultFile = ?, resultExpiresAt = ?, resultEncoding = ?,
+             resultStatus = 'inline', resultSummary = ?, resultArchiveKey = NULL,
+             resultArchiveAt = ?, updatedAt = ? WHERE id = ?`,
+      ).run(
+        result,
+        resultFile,
+        expiresAt,
+        options.encoding ?? "identity",
+        options.summary ?? null,
+        options.archiveAt ?? null,
+        new Date().toISOString(),
+        id,
+      );
+    },
+
+    getResult(id: string): StoredTaskResult | undefined {
+      return db.prepare(
+        `SELECT result, resultFile, resultExpiresAt, resultEncoding, resultStatus,
+                resultSummary, resultArchiveKey, resultArchiveAt
+         FROM tasks WHERE id = ?`,
+      ).get(id) as StoredTaskResult | undefined;
+    },
+
+    listResultsToArchive(before: string): ExpiredTaskResult[] {
+      return db.prepare(
+        `SELECT id, resultFile, resultArchiveKey FROM tasks
+         WHERE result IS NOT NULL AND resultStatus = 'inline' AND resultArchiveAt <= ?`,
+      ).all(before) as ExpiredTaskResult[];
+    },
+
+    markResultArchived(id: string, archiveKey: string): void {
+      db.prepare(
+        `UPDATE tasks SET result = NULL, resultFile = NULL, resultStatus = 'archived',
+                resultArchiveKey = ?, updatedAt = ? WHERE id = ?`,
+      ).run(archiveKey, new Date().toISOString(), id);
+    },
+
+    listExpiredResults(before: string): ExpiredTaskResult[] {
+      return db.prepare(
+        `SELECT id, resultFile, resultArchiveKey FROM tasks
+         WHERE resultStatus != 'expired' AND resultExpiresAt <= ?`,
+      ).all(before) as ExpiredTaskResult[];
+    },
+
+    clearResult(id: string): void {
+      db.prepare(
+        `UPDATE tasks SET result = NULL, resultFile = NULL, resultStatus = 'expired',
+          resultSummary = NULL, resultArchiveKey = NULL, updatedAt = ? WHERE id = ?`,
+      ).run(new Date().toISOString(), id);
     },
 
     insertEvent(event: TaskEvent): void {
@@ -311,8 +396,8 @@ export function createTaskDb(db: Database.Database): TaskDb {
     insertQualityScore(record: QualityScoreRecord): void {
       db.prepare(
         `
-        INSERT INTO quality_scores (taskId, nodeId, agentId, agentType, score, completeness, relevance, format, needsReview, timestamp)
-        VALUES (@taskId, @nodeId, @agentId, @agentType, @score, @completeness, @relevance, @format, @needsReview, @timestamp)
+        INSERT INTO quality_scores (taskId, nodeId, agentId, agentType, score, completeness, relevance, format, needsReview, responseTimeMs, timestamp)
+        VALUES (@taskId, @nodeId, @agentId, @agentType, @score, @completeness, @relevance, @format, @needsReview, @responseTimeMs, @timestamp)
       `,
       ).run({
         taskId: record.taskId,
@@ -324,22 +409,26 @@ export function createTaskDb(db: Database.Database): TaskDb {
         relevance: record.relevance,
         format: record.format,
         needsReview: record.needsReview ? 1 : 0,
+        responseTimeMs: record.responseTimeMs ?? null,
         timestamp: record.timestamp,
       });
     },
 
-    listQualityScores(agentId?: string, limit: number = 500): QualityScoreRecord[] {
-      const rows = (
-        agentId
-          ? db
-              .prepare(
-                "SELECT * FROM quality_scores WHERE agentId = ? ORDER BY id ASC LIMIT ?",
-              )
-              .all(agentId, limit)
-          : db
-              .prepare("SELECT * FROM quality_scores ORDER BY id ASC LIMIT ?")
-              .all(limit)
-      ) as Array<{
+    listQualityScores(agentId?: string, limit: number = 500, since?: string): QualityScoreRecord[] {
+      const filters: string[] = [];
+      const params: Array<string | number> = [];
+      if (agentId) {
+        filters.push("agentId = ?");
+        params.push(agentId);
+      }
+      if (since) {
+        filters.push("timestamp >= ?");
+        params.push(since);
+      }
+      const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+      const rows = db.prepare(
+        `SELECT * FROM quality_scores ${where} ORDER BY timestamp ASC, id ASC LIMIT ?`,
+      ).all(...params, limit) as Array<{
         taskId: string;
         nodeId: string;
         agentId: string | null;
@@ -349,6 +438,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
         relevance: number;
         format: number;
         needsReview: number;
+        responseTimeMs: number | null;
         timestamp: string;
       }>;
 
@@ -362,6 +452,7 @@ export function createTaskDb(db: Database.Database): TaskDb {
         relevance: r.relevance,
         format: r.format,
         needsReview: r.needsReview === 1,
+        responseTimeMs: r.responseTimeMs == null ? undefined : Number(r.responseTimeMs),
         timestamp: r.timestamp,
       }));
     },

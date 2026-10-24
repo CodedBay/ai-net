@@ -594,9 +594,13 @@ export function reputationDeltaForScore(score: number, neutralScore = 50, maxDel
  * mirror of the on-chain reputation score (kept in sync by `registry/sync.ts`),
  * so quality feedback ultimately flows into the on-chain reputation.
  */
-export function updateAgentReputation(agentId: string, delta: number): void {
+export function updateAgentReputation(
+  agentId: string,
+  delta: number,
+  event?: { taskId: string; nodeId: string; timestamp: string },
+): void {
   try {
-    createAgentDb(getAgentDb()).updateReputation(agentId, delta);
+    createAgentDb(getAgentDb()).updateReputation(agentId, delta, event);
   } catch (err) {
     // Non-fatal: an agent absent from the local registry must not fail the DAG.
     log.warn({ err, agentId }, 'failed to update agent reputation');

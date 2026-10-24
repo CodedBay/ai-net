@@ -1,20 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { AgentRegistryPage } from './pages/AgentRegistryPage';
 
 test.describe('Agent Registry Browser', () => {
-  test('navigates to /agents and asserts registry table renders rows', async ({ page }) => {
-    // Navigate to /agents
-    await page.goto('/agents');
+  test('navigates to /agents and renders registry cards', async ({ page }) => {
+    const registry = new AgentRegistryPage(page);
+    await registry.open();
 
-    // Wait for the table to render
-    await page.waitForSelector('#agent-table');
+    await expect(registry.cards()).toHaveCount(3);
 
-    // Assert rows are visible
-    const rows = page.locator('#agent-table tbody tr.agent-row');
-    await expect(rows).toHaveCount(3);
-
-    // Assert contents of rows
-    await expect(page.locator('[data-testid="agent-row-agent-1"]')).toContainText('Research Specialist');
-    await expect(page.locator('[data-testid="agent-row-agent-2"]')).toContainText('Smart Contract Dev');
-    await expect(page.locator('[data-testid="agent-row-agent-3"]')).toContainText('QA Audit Agent');
+    await expect(registry.card('agent-1')).toContainText('Research Specialist');
+    await expect(registry.card('agent-2')).toContainText('Smart Contract Dev');
+    await expect(registry.card('agent-3')).toContainText('QA Audit Agent');
   });
 });

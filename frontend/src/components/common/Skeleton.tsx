@@ -176,3 +176,18 @@ export const SkeletonTaskDetail: React.FC = () => (
     </div>
   </div>
 );
+
+export const SkeletonDAGVisualization: React.FC = () => (
+  <div className={styles.dagSkeleton} data-testid="dag-visualization-skeleton" aria-hidden="true">
+    <Skeleton width="12rem" height="1.5rem" />
+    <div className={styles.dagNodes}>
+      {[0, 1, 2].map((node) => (
+        <div className={styles.dagNode} key={node}>
+          <Skeleton width="5rem" height="0.7rem" />
+          <Skeleton width="7rem" height="1rem" />
+          <Skeleton variant="pill" width="4rem" height="1.25rem" />
+        </div>
+      ))}
+    </div>
+  </div>
+);

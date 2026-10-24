@@ -10,6 +10,28 @@
   border-radius: var(--radius-xl);
 }
 
+.sidebar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sheet {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .group {
   display: flex;
   flex-direction: column;
@@ -51,6 +73,7 @@
   border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 600;
+  min-height: 36px;
   box-shadow: none;
   text-transform: capitalize;
 }
@@ -63,7 +86,7 @@
 }
 
 .capChip:active {
-  background: rgba(99, 102, 241, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   transform: scale(0.95);
 }
 
@@ -76,17 +99,18 @@
 .capChipActive:hover {
   background: var(--accent-surface-strong);
   border-color: var(--primary);
-  color: #C7D2FE;
+  color: var(--text-muted);
 }
 
 .capChipActive:active {
-  background: rgba(99, 102, 241, 0.35);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
   transform: scale(0.95);
 }
 
 /* Price slider */
 .slider {
   width: 180px;
+  min-height: 44px;
   accent-color: var(--primary);
   cursor: pointer;
 }
@@ -111,6 +135,7 @@
   padding: 7px 14px;
   font-size: 0.8rem;
   font-weight: 600;
+  min-height: 40px;
   box-shadow: none;
   border-radius: 0;
 }
@@ -123,7 +148,7 @@
 }
 
 .toggleButton:active {
-  background: rgba(255, 255, 255, 0.09);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
   transform: scale(0.95);
 }
 
@@ -139,7 +164,7 @@
 }
 
 .toggleButtonActive:active {
-  background: var(--primary-hover, #7c3aed);
+  background: var(--primary-hover, var(--accent));
   transform: scale(0.95);
 }
 
@@ -155,8 +180,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   background: var(--white-alpha-04);
   border: 1px solid var(--panel-border);
   color: var(--text-secondary);
@@ -172,7 +197,7 @@
 }
 
 .iconAction:active {
-  background: rgba(99, 102, 241, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   transform: scale(0.92);
 }
 
@@ -192,11 +217,12 @@
   border-radius: var(--radius-lg);
   font-size: 0.8rem;
   font-weight: 600;
+  min-height: 44px;
   box-shadow: none;
 }
 
 .resetButton:active {
-  background: rgba(239, 68, 68, 0.18);
+  background: color-mix(in srgb, var(--status-danger) 18%, transparent);
   transform: scale(0.96);
 }
 
@@ -211,4 +237,30 @@
   color: var(--status-danger-text);
   transform: none;
   box-shadow: none;
+}
+
+@media (max-width: 767px) {
+  .bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+  }
+
+  .capChip,
+  .toggleButton {
+    min-height: 44px;
+  }
+
+  .capList {
+    gap: 8px;
+  }
+
+  .slider {
+    width: 100%;
+  }
+
+  .actions {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
 }

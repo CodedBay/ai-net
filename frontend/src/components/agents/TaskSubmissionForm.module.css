@@ -5,7 +5,7 @@
 
 /* ── Step descriptive text ─────────────────────────────────────────────────── */
 .stepDescription {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   font-size: 0.9rem;
   margin-bottom: 1.25rem;
   line-height: 1.5;
@@ -24,25 +24,25 @@
 .charCounter {
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   flex-shrink: 0;
   white-space: nowrap;
   transition: color 0.15s ease;
 }
 
 .charCounterWarning {
-  color: var(--warning, #f59e0b);
+  color: var(--warning, var(--status-warning-text));
   font-weight: 600;
 }
 
 .charCounterExceeded {
-  color: var(--danger, #ef4444);
+  color: var(--danger, var(--status-danger-text));
   font-weight: 700;
 }
 
 /* ── Input error state ─────────────────────────────────────────────────────── */
 .inputError {
-  border-color: var(--danger, #ef4444) !important;
+  border-color: var(--danger, var(--status-danger-border)) !important;
 }
 
 /* ── Agent selection grid ──────────────────────────────────────────────────── */
@@ -65,21 +65,21 @@
   gap: 8px;
   padding: 14px 16px;
   border-radius: var(--radius-xl, 12px);
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-color, var(--border-strong));
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
   background: var(--surface-glass-subtle, transparent);
 }
 
 .agentOption:hover {
-  border-color: var(--accent, #3b82f6);
-  box-shadow: 0 0 0 1px var(--accent, #3b82f6);
+  border-color: var(--accent, var(--info-border));
+  box-shadow: 0 0 0 1px var(--accent, var(--accent-info));
 }
 
 .agentOptionSelected {
-  border-color: var(--accent, #3b82f6);
-  background: var(--accent-surface, rgba(59, 130, 246, 0.08));
-  box-shadow: 0 0 0 1px var(--accent, #3b82f6);
+  border-color: var(--accent, var(--info-border));
+  background: var(--accent-surface, color-mix(in srgb, var(--accent-info) 8%, transparent));
+  box-shadow: 0 0 0 1px var(--accent, var(--accent-info));
 }
 
 .agentOptionHeader {
@@ -93,7 +93,7 @@
   height: 16px;
   flex-shrink: 0;
   cursor: pointer;
-  accent-color: var(--accent, #3b82f6);
+  accent-color: var(--accent, var(--accent-info));
 }
 
 .agentName {
@@ -108,8 +108,8 @@
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--accent, var(--accent-info));
+  color: var(--text-inverse);
   letter-spacing: 0.02em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -117,7 +117,7 @@
 
 .agentCost {
   font-size: 0.8rem;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   padding-left: 26px; /* align under agent name, after checkbox */
 }
 
@@ -125,7 +125,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--danger, #ef4444);
+  color: var(--danger, var(--status-danger-text));
   margin-top: 0.5rem;
   font-size: 0.875rem;
 }
@@ -134,7 +134,7 @@
 .reviewSection {
   margin-bottom: 1.5rem;
   padding: 16px 20px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-color, var(--border-strong));
   border-radius: var(--radius-xl, 12px);
   background: var(--surface-glass-subtle, transparent);
 }
@@ -142,7 +142,7 @@
 .reviewSectionTitle {
   font-size: 0.9rem;
   font-weight: 700;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin: 0 0 12px;
@@ -162,7 +162,7 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid var(--border-color, var(--border-strong));
   border-radius: var(--radius-lg, 8px);
   overflow: hidden;
   margin-bottom: 12px;
@@ -173,7 +173,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-color, var(--border-strong));
   gap: 1rem;
 }
 
@@ -190,14 +190,14 @@
 }
 
 .costIcon {
-  color: var(--accent, #3b82f6);
+  color: var(--accent, var(--accent-info));
   flex-shrink: 0;
 }
 
 .costAgentLabel {
   font-size: 0.75rem;
-  color: var(--text-muted, #64748b);
-  background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.1));
+  color: var(--text-muted, var(--text-secondary));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-muted) 10%, transparent));
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -210,24 +210,24 @@
 }
 
 .costRowSubtotal {
-  background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.05));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-muted) 5%, transparent));
 }
 
 .costRowSubtotal .costLabel {
   font-weight: 600;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
 }
 
 .costRowFee {
-  background: var(--surface-glass-subtle, rgba(148, 163, 184, 0.05));
+  background: var(--surface-glass-subtle, color-mix(in srgb, var(--text-muted) 5%, transparent));
 }
 
 .costRowFee .costLabel {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
 }
 
 .costRowTotal {
-  background: var(--accent-surface, rgba(59, 130, 246, 0.06));
+  background: var(--accent-surface, color-mix(in srgb, var(--accent-info) 6%, transparent));
   padding: 14px 16px;
 }
 
@@ -240,13 +240,13 @@
 .costValueTotal {
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--accent, #3b82f6);
+  color: var(--accent, var(--accent-info));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .noAgentsNote {
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   font-style: italic;
   font-size: 0.9rem;
   margin: 0 0 8px;
@@ -254,7 +254,13 @@
 
 .costDisclaimer {
   font-size: 0.78rem;
-  color: var(--text-muted, #64748b);
+  color: var(--text-muted, var(--text-secondary));
   line-height: 1.4;
   margin: 0;
+}
+
+.estimateLoading {
+  font-size: 0.78rem;
+  color: var(--text-muted, var(--text-secondary));
+  margin: 0 0 8px;
 }

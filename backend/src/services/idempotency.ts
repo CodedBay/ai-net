@@ -27,6 +27,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { getTaskDb } from '../db/tasks';
 import { createLogger } from '../utils/logger';
 
 // ---------------------------------------------------------------------------
@@ -45,22 +46,40 @@ export interface IdempotencyEntry {
   createdAt: string;
   /** ISO-8601 timestamp when the entry expires. */
   expiresAt: string;
+  /**
+   * SHA-256 hash of the original request payload.  `null` for entries
+   * persisted before request hashing existed (they replay unconditionally).
+   */
+  requestHash: string | null;
 }
 
 export interface IdempotencyStoreOptions {
   /** Time-to-live in milliseconds.  Default: 24 h. */
   ttlMs?: number;
-  /** Background cleanup interval in ms.  Default: 5 min.  Set to 0 to disable. */
+  /** Background cleanup interval in ms.  Default: 24 h.  Set to 0 to disable. */
   cleanupIntervalMs?: number;
+  /** Keep externally-owned database handles open when closing the store. */
+  closeDatabase?: boolean;
 }
 
 export interface IdempotencyStore {
   /** Look up a stored entry by key.  Returns `undefined` when absent or expired. */
-  get(key: string): IdempotencyEntry | undefined;
-  /** Persist a response for a given key.  No-op if the key already exists. */
-  storeResponse(key: string, statusCode: number, body: unknown): void;
+  get(key: string, walletAddress?: string): IdempotencyEntry | undefined;
+  /**
+   * Persist a response for a given key.  No-op if the key already exists.
+   *
+   * @param requestHash Optional SHA-256 hash of the original request payload,
+   *                    stored for later payload-mismatch detection.
+   */
+  storeResponse(
+    key: string,
+    statusCode: number,
+    body: unknown,
+    walletAddress?: string,
+    requestHash?: string | null,
+  ): void;
   /** Delete a single entry. */
-  delete(key: string): void;
+  delete(key: string, walletAddress?: string): void;
   /** Remove all expired entries.  Returns the count of deleted rows. */
   cleanup(): number;
   /** Start the background cleanup interval.  Idempotent. */
@@ -77,11 +96,14 @@ export interface IdempotencyStore {
 
 const DDL = `
   CREATE TABLE IF NOT EXISTS idempotency_keys (
-    key         TEXT PRIMARY KEY,
-    status_code INTEGER NOT NULL,
-    body        TEXT    NOT NULL,
-    created_at  TEXT    NOT NULL,
-    expires_at  TEXT    NOT NULL
+    key            TEXT NOT NULL,
+    wallet_address TEXT NOT NULL,
+    response_body  TEXT NOT NULL,
+    status_code    INTEGER NOT NULL,
+    created_at     TEXT NOT NULL,
+    expires_at     TEXT NOT NULL,
+    request_hash   TEXT,
+    PRIMARY KEY (key, wallet_address)
   );
 
   CREATE INDEX IF NOT EXISTS idx_idempotency_expires_at
@@ -93,7 +115,7 @@ const DDL = `
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const DEFAULT_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_CLEANUP_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export function createIdempotencyStore(
   db?: Database.Database | string,
@@ -106,28 +128,56 @@ export function createIdempotencyStore(
     typeof db === 'string'
       ? new Database(db)
       : db ?? new Database(':memory:');
+  const closeDatabase = options.closeDatabase ?? true;
 
   database.pragma('journal_mode = WAL');
   database.pragma('busy_timeout = 5000');
-  database.exec(DDL);
+  const columns = database
+    .prepare('PRAGMA table_info(idempotency_keys)')
+    .all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (columns.length > 0 && (!columnNames.has('wallet_address') || !columnNames.has('response_body'))) {
+    const legacyBodyColumn = columnNames.has('response_body') ? 'response_body' : 'body';
+    const migrateLegacySchema = database.transaction(() => {
+      database.exec('DROP INDEX IF EXISTS idx_idempotency_expires_at');
+      database.exec('ALTER TABLE idempotency_keys RENAME TO idempotency_keys_legacy');
+      database.exec(DDL);
+      database.exec(`
+        INSERT OR IGNORE INTO idempotency_keys
+          (key, wallet_address, response_body, status_code, created_at, expires_at)
+        SELECT key, 'anonymous', ${legacyBodyColumn}, status_code, created_at, expires_at
+        FROM idempotency_keys_legacy
+      `);
+      database.exec('DROP TABLE idempotency_keys_legacy');
+    });
+    migrateLegacySchema();
+  } else {
+    database.exec(DDL);
+    // CREATE TABLE IF NOT EXISTS does not alter an existing table — add the
+    // request_hash column when upgrading a pre-006 database.
+    if (columns.length > 0 && !columnNames.has('request_hash')) {
+      database.exec('ALTER TABLE idempotency_keys ADD COLUMN request_hash TEXT');
+    }
+  }
 
   const log = createLogger({ component: 'idempotency' });
 
   // ── Prepared statements ──────────────────────────────────────────────────
 
   const selectStmt = database.prepare(`
-    SELECT key, status_code, body, created_at, expires_at
+    SELECT key, status_code, response_body, created_at, expires_at, request_hash
     FROM idempotency_keys
-    WHERE key = ? AND expires_at > ?
+    WHERE key = ? AND wallet_address = ? AND expires_at > ?
   `);
 
   const upsertStmt = database.prepare(`
-    INSERT OR IGNORE INTO idempotency_keys (key, status_code, body, created_at, expires_at)
-    VALUES (@key, @statusCode, @body, @createdAt, @expiresAt)
+    INSERT OR IGNORE INTO idempotency_keys
+      (key, wallet_address, response_body, status_code, created_at, expires_at, request_hash)
+    VALUES (@key, @walletAddress, @responseBody, @statusCode, @createdAt, @expiresAt, @requestHash)
   `);
 
   const deleteStmt = database.prepare(`
-    DELETE FROM idempotency_keys WHERE key = ?
+    DELETE FROM idempotency_keys WHERE key = ? AND wallet_address = ?
   `);
 
   const cleanupStmt = database.prepare(`
@@ -141,10 +191,17 @@ export function createIdempotencyStore(
   // ── Public API ───────────────────────────────────────────────────────────
 
   const store: IdempotencyStore = {
-    get(key: string): IdempotencyEntry | undefined {
+    get(key: string, walletAddress = 'anonymous'): IdempotencyEntry | undefined {
       const now = new Date().toISOString();
-      const row = selectStmt.get(key, now) as
-        | { key: string; status_code: number; body: string; created_at: string; expires_at: string }
+      const row = selectStmt.get(key, walletAddress, now) as
+        | {
+            key: string;
+            status_code: number;
+            response_body: string;
+            created_at: string;
+            expires_at: string;
+            request_hash: string | null;
+          }
         | undefined;
 
       if (!row) return undefined;
@@ -152,26 +209,35 @@ export function createIdempotencyStore(
       return {
         key: row.key,
         statusCode: row.status_code,
-        responseBody: row.body,
+        responseBody: row.response_body,
         createdAt: row.created_at,
         expiresAt: row.expires_at,
+        requestHash: row.request_hash,
       };
     },
 
-    storeResponse(key: string, statusCode: number, body: unknown): void {
+    storeResponse(
+      key: string,
+      statusCode: number,
+      body: unknown,
+      walletAddress = 'anonymous',
+      requestHash: string | null = null,
+    ): void {
       const now = new Date();
       const expires = new Date(now.getTime() + ttlMs);
       upsertStmt.run({
         key,
         statusCode,
-        body: JSON.stringify(body),
+        walletAddress,
+        responseBody: JSON.stringify(body),
         createdAt: now.toISOString(),
         expiresAt: expires.toISOString(),
+        requestHash,
       });
     },
 
-    delete(key: string): void {
-      deleteStmt.run(key);
+    delete(key: string, walletAddress = 'anonymous'): void {
+      deleteStmt.run(key, walletAddress);
     },
 
     cleanup(): number {
@@ -214,7 +280,7 @@ export function createIdempotencyStore(
 
     close(): void {
       store.stopCleanup();
-      database.close();
+      if (closeDatabase) database.close();
     },
   };
 
@@ -233,9 +299,10 @@ let _defaultStore: IdempotencyStore | null = null;
  */
 export function getDefaultIdempotencyStore(): IdempotencyStore {
   if (!_defaultStore) {
-    _defaultStore = createIdempotencyStore(undefined, {
+    _defaultStore = createIdempotencyStore(getTaskDb(), {
       ttlMs: Number(process.env.IDEMPOTENCY_TTL_MS) || DEFAULT_TTL_MS,
       cleanupIntervalMs: Number(process.env.IDEMPOTENCY_CLEANUP_MS) || DEFAULT_CLEANUP_MS,
+      closeDatabase: false,
     });
   }
   return _defaultStore;

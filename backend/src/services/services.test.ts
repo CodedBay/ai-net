@@ -130,8 +130,7 @@ describe("createHeartbeatService", () => {
 
     const svc = createHeartbeatService({
       intervalMs: 1_000,
-      staleThresholdMinutes: 5,
-      offlineThresholdHours: 24,
+      staleThresholdSeconds: 300,
       db,
     });
 
@@ -152,8 +151,7 @@ describe("createHeartbeatService", () => {
 
     const svc = createHeartbeatService({
       intervalMs: 1_000,
-      staleThresholdMinutes: 5,
-      offlineThresholdHours: 24,
+      staleThresholdSeconds: 300,
       db,
     });
 
@@ -165,7 +163,7 @@ describe("createHeartbeatService", () => {
     expect(agent?.status).toBe("online");
   });
 
-  it("deletes old offline agents after the offline threshold", () => {
+  it("retains offline agents in the registry", () => {
     const rawDb = makeInMemoryDb();
     const db = createAgentDb(rawDb);
 
@@ -178,8 +176,7 @@ describe("createHeartbeatService", () => {
 
     const svc = createHeartbeatService({
       intervalMs: 1_000,
-      staleThresholdMinutes: 5,
-      offlineThresholdHours: 24,
+      staleThresholdSeconds: 300,
       db,
     });
 
@@ -188,7 +185,7 @@ describe("createHeartbeatService", () => {
     svc.stop();
 
     const agent = db.findById("old-offline-agent");
-    expect(agent).toBeUndefined();
+    expect(agent?.status).toBe("offline");
   });
 
   it("stop() clears the interval and prevents further cleanup runs", () => {

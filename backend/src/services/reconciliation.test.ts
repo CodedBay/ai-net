@@ -1,5 +1,6 @@
 import express from "express";
 import request from "supertest";
+import { errorHandler } from "../api/middleware/errorHandler";
 import { createReconciliationRouter } from "../api/routes/reconciliation";
 import {
   ReconciliationService,
@@ -440,6 +441,7 @@ describe("reconciliation API routes", () => {
         service: service as unknown as ReconciliationService,
       })
     );
+    app.use(errorHandler);
     return app;
   }
 
@@ -473,7 +475,7 @@ describe("reconciliation API routes", () => {
     const response = await request(app).post("/api/reconciliation/run").send({});
 
     expect(response.status).toBe(500);
-    expect(response.body.error).toBe("RECONCILIATION_FAILED");
+    expect(response.body.error.code).toBe("RECONCILIATION_FAILED");
   });
 
   it("GET /report returns the latest report when one exists", async () => {
@@ -497,7 +499,7 @@ describe("reconciliation API routes", () => {
     const response = await request(app).get("/api/reconciliation/report");
 
     expect(response.status).toBe(404);
-    expect(response.body.error).toBe("NO_RECONCILIATION_REPORT");
+    expect(response.body.error.code).toBe("NO_RECONCILIATION_REPORT");
   });
 });
 

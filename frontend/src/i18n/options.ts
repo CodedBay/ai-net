@@ -1,9 +1,10 @@
 import type { InitOptions } from 'i18next'
 
 import en from './locales/en.json'
+import es from './locales/es.json'
 import zh from './locales/zh.json'
 
-export const SUPPORTED_LANGUAGES = ['en', 'zh'] as const
+export const SUPPORTED_LANGUAGES = ['en', 'es', 'zh'] as const
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
 
@@ -18,6 +19,7 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
 export const i18nBaseOptions: InitOptions = {
   resources: {
     en: { translation: en },
+    es: { translation: es },
     zh: { translation: zh },
   },
   fallbackLng: 'en',

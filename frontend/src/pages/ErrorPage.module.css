@@ -1,0 +1,115 @@
+/* Shared error page layout */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+}
+
+.illustrationWrapper {
+  margin-bottom: 2rem;
+  /* Illustrations scale down on mobile — see ErrorIllustration.module.css */
+}
+
+.heading {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.75rem;
+  line-height: 1.2;
+}
+
+.body {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin: 0 auto 2rem;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  gap: 0.875rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* Primary action button */
+.primaryButton {
+  padding: 0.65rem 1.5rem;
+  border-radius: 8px;
+  background-color: var(--accent);
+  color: var(--text-inverse, #fff);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+.primaryButton:hover {
+  background-color: var(--accent-hover, var(--accent));
+  opacity: 0.9;
+}
+
+.primaryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Secondary action button */
+.secondaryButton {
+  padding: 0.65rem 1.5rem;
+  border-radius: 8px;
+  background-color: transparent;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 0.9rem;
+  text-decoration: none;
+  border: 1px solid var(--border-primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: background-color 150ms ease;
+}
+
+.secondaryButton:hover {
+  background-color: var(--surface-hover, var(--surface-primary));
+}
+
+.secondaryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .heading {
+    font-size: 1.5rem;
+  }
+
+  .body {
+    font-size: 0.9rem;
+  }
+
+  .actions {
+    flex-direction: column;
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    justify-content: center;
+  }
+}

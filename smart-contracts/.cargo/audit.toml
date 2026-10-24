@@ -1,0 +1,20 @@
+# cargo-audit configuration for ai-net smart-contracts
+# See: https://docs.rs/cargo-audit/latest/cargo_audit/config/struct.AuditConfig.html
+#
+# To acknowledge a known/accepted advisory, add it to the [advisories] ignore
+# list below with a rationale comment. Each entry should be reviewed before
+# every release and revisited when a fix becomes available.
+#
+# Example:
+# [advisories]
+# ignore = [
+#   "RUSTSEC-2024-0001", # <package>: <brief rationale, e.g. "only triggered via untrusted TOML input, mitigated by...">
+# ]
+
+[advisories]
+ignore = []
+
+[output]
+# Emit machine-readable JSON to stdout for downstream tooling (e.g. SARIF upload).
+# Set to "terminal" for human-readable output during local development.
+format = "terminal"

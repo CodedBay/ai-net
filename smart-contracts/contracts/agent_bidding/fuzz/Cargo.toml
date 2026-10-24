@@ -1,0 +1,40 @@
+[package]
+name = "agent-bidding-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# Use rlib of the contract (not cdylib) so fuzz targets can call its internals
+agent-bidding = { path = "..", features = [] }
+soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+
+# Prevent this from interfering with normal workspace builds
+[[bin]]
+name = "fuzz_bid_amounts"
+path = "src/fuzz_bid_amounts.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_auction_params"
+path = "src/fuzz_auction_params.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_agent_ids"
+path = "src/fuzz_agent_ids.rs"
+test = false
+doc = false
+
+[profile.release]
+# Enable debug info for better crash reports
+debug = 1
+
+[profile.dev]
+opt-level = 1

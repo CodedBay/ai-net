@@ -27,11 +27,11 @@
 }
 
 .skipButton:active {
-  color: var(--text-primary, #374151);
+  color: var(--text-primary, var(--text-primary));
 }
 
 .skipButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -74,37 +74,37 @@
   flex: 1;
   height: 2px;
   min-width: 20px;
-  background: var(--bg-muted, #e5e7eb);
+  background: var(--bg-muted, var(--surface-hover));
   margin: 0 4px;
   transition: background 0.3s;
 }
 
 /* Pending: grey outline */
 .stepDot--pending .stepDotLabel {
-  color: var(--text-muted, #9ca3af);
-  border-color: var(--bg-muted, #d1d5db);
+  color: var(--text-muted, var(--text-muted));
+  border-color: var(--bg-muted, var(--border-muted));
   background: transparent;
 }
 
 /* Current: primary filled */
 .stepDot--current .stepDotLabel {
-  color: #fff;
-  border-color: var(--primary, #3b82f6);
-  background: var(--primary, #3b82f6);
+  color: var(--text-inverse);
+  border-color: var(--primary, var(--info-border));
+  background: var(--primary, var(--accent-info));
 }
 
 /* Done: green check icon */
 .stepDot--done {
-  color: var(--success, #22c55e);
+  color: var(--success, var(--status-success-text));
 }
 .stepDot--done .stepConnector {
-  background: var(--success, #22c55e);
+  background: var(--success, var(--status-success));
 }
 
 /* Error: red outline */
 .stepDot--error .stepDotLabel {
-  color: var(--error, #ef4444);
-  border-color: var(--error, #ef4444);
+  color: var(--error, var(--status-danger-text));
+  border-color: var(--error, var(--status-danger-border));
   background: transparent;
 }
 
@@ -171,21 +171,21 @@
   border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 500;
-  color: var(--text-main, #374151);
+  color: var(--text-main, var(--text-primary));
   transition: background 0.15s, transform 0.1s;
 }
 
 .backButton:hover {
-  background: var(--bg-muted, #f3f4f6);
+  background: var(--bg-muted, var(--surface-hover));
 }
 
 .backButton:active {
-  background: var(--border, #e5e7eb);
+  background: var(--border, var(--surface-hover));
   transform: scale(0.96);
 }
 
 .backButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -201,16 +201,16 @@
 }
 
 .nextButton:hover:not(:disabled), .primaryButton:hover:not(:disabled) {
-  background: var(--primary-hover, #2563eb);
+  background: var(--primary-hover, var(--accent-info));
 }
 
 .nextButton:active:not(:disabled), .primaryButton:active:not(:disabled) {
-  background: var(--primary-active, #1d4ed8);
+  background: var(--primary-active, var(--accent-info));
   transform: scale(0.96);
 }
 
 .nextButton:focus-visible, .primaryButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -240,12 +240,12 @@
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: #ffffff;
-  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border, var(--border-strong));
   border-radius: 999px;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--text-main, #111827);
+  color: var(--text-main, var(--text-primary));
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono, monospace);
 }
@@ -264,7 +264,7 @@
 }
 
 .link:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
   border-radius: 4px;
 }

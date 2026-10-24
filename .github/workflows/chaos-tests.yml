@@ -1,0 +1,124 @@
+name: Chaos Tests (Weekly)
+
+on:
+  schedule:
+    # Run every Monday at 02:00 UTC – outside business hours to avoid noise.
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual trigger (optional)'
+        required: false
+        default: 'manual'
+
+concurrency:
+  group: chaos-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Allow the job to write a step summary and upload artifacts.
+  actions: write
+
+jobs:
+  chaos-coordinator:
+    name: coordinator-chaos-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run chaos test suite
+        # --testPathPattern isolates only the chaos file so this job doesn't
+        # re-run the full unit suite (CI already handles that on every PR).
+        run: |
+          npx jest \
+            --testPathPattern="coordinator.chaos.test" \
+            --forceExit \
+            --json \
+            --outputFile=chaos-results.json \
+            2>&1 | tee chaos-output.txt
+
+      - name: Generate chaos test report
+        if: always()
+        run: |
+          node -e "
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('chaos-results.json', 'utf8'));
+            const passed = results.numPassedTests;
+            const failed = results.numFailedTests;
+            const total  = results.numTotalTests;
+            const suites = results.testResults || [];
+
+            let md = '## Chaos Test Report\\n\\n';
+            md += '| Metric | Value |\\n|---|---|\\n';
+            md += \`| Total scenarios | \${total} |\\n\`;
+            md += \`| Passed | \${passed} |\\n\`;
+            md += \`| Failed | \${failed} |\\n\`;
+            md += '\\n### Failure Modes\\n\\n';
+            md += '| Scenario | Result |\\n|---|---|\\n';
+            md += '| C1 · Single agent crash mid-pipeline | ' + (failed === 0 ? '✅ handled' : '❌ unhandled') + ' |\\n';
+            md += '| C2 · Agent timeout (near-30s) | ' + (failed === 0 ? '✅ handled' : '❌ unhandled') + ' |\\n';
+            md += '| C3 · Agent returns malformed JSON | ' + (failed === 0 ? '✅ handled' : '❌ unhandled') + ' |\\n';
+            md += '| C4 · Two of five agents fail simultaneously | ' + (failed === 0 ? '✅ handled' : '❌ unhandled') + ' |\\n';
+
+            md += '\\n### Per-Suite Details\\n\\n';
+            for (const suite of suites) {
+              const suiteName = suite.testFilePath.split('/').pop();
+              const suiteStatus = suite.status === 'passed' ? '✅' : '❌';
+              md += \`#### \${suiteStatus} \${suiteName}\\n\\n\`;
+              for (const t of (suite.testResults || [])) {
+                const icon = t.status === 'passed' ? '✅' : '❌';
+                md += \`- \${icon} \${t.fullName}\\n\`;
+              }
+              md += '\\n';
+            }
+
+            fs.writeFileSync('chaos-report.md', md);
+            console.log(md);
+          "
+
+      - name: Post report to job summary
+        if: always()
+        run: cat chaos-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload chaos test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-test-report-${{ github.run_id }}
+          path: |
+            backend/chaos-results.json
+            backend/chaos-report.md
+            backend/chaos-output.txt
+          retention-days: 30
+
+      - name: Fail job if any chaos test failed
+        if: always()
+        run: |
+          FAILED=$(node -e "
+            const r = require('./chaos-results.json');
+            process.exit(r.numFailedTests > 0 ? 1 : 0);
+          " 2>&1; echo $?)
+          if [ "$FAILED" = "1" ]; then
+            echo "❌ One or more chaos scenarios are NOT handled by the coordinator."
+            echo "See the chaos-test-report artifact for details."
+            exit 1
+          else
+            echo "✅ All chaos scenarios are gracefully handled."
+          fi

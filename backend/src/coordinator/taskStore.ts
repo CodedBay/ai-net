@@ -1,5 +1,6 @@
 import type { Task, DAGNode } from '../types/task';
 import { getTaskDb, createTaskDb } from '../db/tasks';
+import { metricsService } from '../services/metrics';
 
 function db() {
   return createTaskDb(getTaskDb());
@@ -7,6 +8,8 @@ function db() {
 
 export function createTask(task: Task): void {
   db().insert(task);
+  // Increment tasks_submitted_total Prometheus counter
+  metricsService.recordTaskSubmitted();
 }
 
 export function getTask(taskId: string): Task | undefined {

@@ -1,0 +1,56 @@
+name: Stellar Market Report E2E (weekly)
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-report-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      RUN_STELLAR_E2E_TESTS: 'true'
+      STELLAR_NETWORK: testnet
+      STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_COORDINATOR_SECRET: ${{ secrets.STELLAR_TESTNET_FARM_SECRET }}
+      STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_FARM_SECRET }}
+      REGISTRY_CONTRACT_ID: ${{ vars.STELLAR_AGENT_REGISTRY_CONTRACT_ID }}
+      SOROBAN_CLI_BIN: stellar
+      VENICE_API_KEY: testnet-e2e-no-external-inference
+      DATABASE_URL: ./data/stellar-e2e.db
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Set up Stellar CLI
+        uses: stellar/stellar-cli@v28.1.0
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Install smart-contract test dependencies
+        working-directory: smart-contracts
+        run: npm ci
+
+      - name: Verify testnet configuration
+        run: |
+          test -n "$STELLAR_COORDINATOR_SECRET" || { echo 'STELLAR_TESTNET_FARM_SECRET is required'; exit 1; }
+          test -n "$REGISTRY_CONTRACT_ID" || { echo 'Set the STELLAR_AGENT_REGISTRY_CONTRACT_ID repository variable'; exit 1; }
+
+      - name: Run market report E2E against Stellar testnet
+        run: npx jest --config ../tests/e2e/jest.stellar.config.js --runInBand --runTestsByPath ../tests/e2e/market-report-stellar.test.ts

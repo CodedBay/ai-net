@@ -1,0 +1,2568 @@
+openapi: 3.1.0
+info:
+  title: ai-net Backend API
+  version: 0.1.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  description: >
+    REST & WebSocket API for the ai-net backend — multi-agent task
+    orchestration, agent registry, payment reconciliation, background jobs, and
+    system health.
+
+
+    ---
+
+
+    ## 🔐 Authentication
+
+
+    ai-net uses header-based cryptographic authentication schemes:
+
+
+    ### 1. Wallet Authentication (`WalletAuth`)
+
+    - **Header:** `walletpublickey: <Stellar-or-Wallet-Public-Key>`
+
+    - Used for creating tasks, retrieving task state, and managing owned resources.
+
+    - Example: `walletpublickey: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA`
+
+
+    ### 2. Agent Cryptographic Signature Authentication (`AgentSignatureAuth`)
+
+    - **Headers:**
+      - `x-signature: <Base64-or-Hex-Ed25519-Signature>`
+      - `x-challenge: <Signed-Challenge-String>`
+    - Used for agent de-registration and privileged agent operations.
+
+    - The challenge string must match the challenge issued by the server within the replay window.
+
+
+    ---
+
+
+    ## ⚡ Rate Limiting
+
+
+    All public and authenticated endpoints are rate-limited to ensure system stability.
+
+    Rate limit status is communicated via standard HTTP response headers:
+
+
+    | Header | Description |
+
+    |---|---|
+
+    | `X-RateLimit-Limit` | Maximum requests allowed within the current time window |
+
+    | `X-RateLimit-Remaining` | Number of requests remaining in the current window |
+
+    | `X-RateLimit-Reset` | Time (epoch seconds or ms) when the current window resets |
+
+
+    When rate limits are exceeded, the API returns `429 Too Many Requests` with an error payload explaining the retry delay.
+
+
+    ---
+
+
+    ## 📡 Live Task Stream (WebSocket)
+
+
+    The server exposes real-time task progress over WebSocket at:
+
+
+    ```
+
+    ws://<host>/tasks/:id/stream
+
+    ```
+
+
+    Optional query param: `?lastEventId=<seq>` to resume streaming from a specific event cursor instead of replaying full task history.
+
+
+    ### Protocol Flow:
+
+    1. **Connect & Authenticate:** Send `{ "walletPublicKey": "<key>" }` as the first message within 10 seconds of connection.
+
+    2. **Replay & Catch-Up:** The server verifies ownership and replays past events (all events, or only those after `lastEventId`).
+
+    3. **Live Streaming:** Subsequent execution events (`node_started`, `node_completed`, `payment_released`, `task_completed`, `task_failed`) are pushed in real time.
+
+    4. **Heartbeat:** Server sends periodic pings every 30s. Client must respond with `{ "type": "pong" }` within 10s.
+
+
+    ### WebSocket Close Codes:
+
+    - `4001` / `4400` — Bad Request / Invalid Handshake
+
+    - `4003` — Forbidden (Wallet does not own task)
+
+    - `4004` — Task Not Found
+
+    - `4008` — Auth Handshake Timeout
+
+    - `4408` — Heartbeat Pong Timeout (Stale connection)
+
+
+    ---
+
+
+    ## 📄 Pagination & Filtering
+
+
+    List endpoints support standardized query parameters:
+
+    - `page` (default `1`): 1-indexed page number
+
+    - `pageSize` (default `10`, max `100`): Number of items per page
+
+    - `sort` (e.g. `createdAt:desc`, `createdAt:asc`): Sort order
+
+    - `status` (e.g. `queued`, `running`, `completed`, `failed`, `cancelled`): Status filter
+
+    - `q`: Full-text or substring search query
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://staging.example.com
+    description: Staging
+  - url: https://api.example.com
+    description: Production
+components:
+  securitySchemes:
+    WalletAuth:
+      type: apiKey
+      in: header
+      name: walletpublickey
+      description: Stellar wallet public key of the task owner / client (e.g., G...)
+    AgentSignatureAuth:
+      type: apiKey
+      in: header
+      name: x-signature
+      description: Cryptographic Ed25519 signature of the challenge for agent actions
+    AgentChallengeAuth:
+      type: apiKey
+      in: header
+      name: x-challenge
+      description: Challenge string that was signed by the agent's keypair
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JSON Web Token for authenticated user sessions
+    AdminApiKey:
+      type: apiKey
+      in: header
+      name: X-Admin-API-Key
+      description: Administrative API key for protected operations
+  headers:
+    X-RateLimit-Limit:
+      description: The maximum number of requests allowed in the current period.
+      schema:
+        type: integer
+        example: 100
+    X-RateLimit-Remaining:
+      description: The number of remaining requests in the current period.
+      schema:
+        type: integer
+        example: 99
+    X-RateLimit-Reset:
+      description: The time at which the current rate limit window resets in UTC epoch
+        seconds.
+      schema:
+        type: integer
+        example: 1724601600
+    X-Request-Id:
+      description: Unique request identifier for distributed tracing and logging.
+      schema:
+        type: string
+        example: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+    X-API-Version:
+      description: The negotiated API version used to process the request.
+      schema:
+        type: string
+        example: "1.0"
+  schemas:
+    CreateTaskRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+        walletPublicKey:
+          type: string
+        maxBudgetXLM:
+          type: number
+          minimum: 0.1
+        agentPreferences:
+          type: array
+          items:
+            type: string
+        priority:
+          type: string
+          enum:
+            - low
+            - normal
+            - high
+            - critical
+      additionalProperties: false
+    RegisterAgentRequest:
+      type: object
+      required:
+        - agentId
+        - capabilities
+        - pricingXLM
+        - endpoint
+        - stellarPublicKey
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+        capabilities:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        pricingXLM:
+          type: number
+          minimum: 0
+        endpoint:
+          type: string
+        stellarPublicKey:
+          type: string
+          pattern: ^G[A-Z2-7]{55}$
+        bondAmountXLM:
+          type: number
+          minimum: 0
+      additionalProperties: false
+    Pagination:
+      type: object
+      required: []
+      properties:
+        page:
+          type: number
+          minimum: 1
+        pageSize:
+          type: number
+          minimum: 1
+          maximum: 100
+      additionalProperties: false
+    IdParam:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    TaskStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - completed
+        - failed
+        - cancelled
+      example: queued
+      description: Current lifecycle state of the task orchestration.
+    NodeStatus:
+      type: string
+      enum:
+        - pending
+        - running
+        - completed
+        - failed
+      example: completed
+      description: Execution state of an individual node in the task DAG.
+    JobPriority:
+      type: string
+      enum:
+        - low
+        - normal
+        - high
+        - critical
+      example: normal
+      description: Execution priority for the background job queue.
+    DAGNode:
+      type: object
+      required:
+        - nodeId
+        - agentType
+        - prompt
+        - dependsOn
+        - status
+      properties:
+        nodeId:
+          type: string
+          example: node_research_1
+        agentType:
+          type: string
+          example: research
+        prompt:
+          type: string
+          example: Analyze DeFi liquidity trends on Stellar DEX
+        dependsOn:
+          type: array
+          items:
+            type: string
+          example: []
+        status:
+          $ref: "#/components/schemas/NodeStatus"
+        result:
+          type: object
+          description: Result output produced by the specialized agent upon successful
+            completion.
+          example:
+            summary: Liquidity increased by 14% week-over-week.
+        error:
+          type:
+            - string
+            - "null"
+          example: null
+          description: Error message if the node execution failed.
+    CreateTaskResponse:
+      type: object
+      required:
+        - taskId
+        - status
+        - dagPreview
+      properties:
+        taskId:
+          type: string
+          example: task_ab12cd34ef56
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        dagPreview:
+          type: array
+          items:
+            $ref: "#/components/schemas/DAGNode"
+        jobId:
+          type: string
+          example: job_98fe76dc54ba
+          description: ID of the background job queued for asynchronous execution.
+        createdAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:00:00.000Z
+    Task:
+      type: object
+      description: Full task object with decomposed DAG and execution state.
+      required:
+        - id
+        - taskId
+        - prompt
+        - walletPublicKey
+        - status
+        - dag
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          example: task_ab12cd34ef56
+        taskId:
+          type: string
+          example: task_ab12cd34ef56
+        prompt:
+          type: string
+          example: Research Stellar smart contract security best practices
+        walletPublicKey:
+          type: string
+          example: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        dag:
+          type: array
+          items:
+            $ref: "#/components/schemas/DAGNode"
+        createdAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:00:00.000Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:05:00.000Z
+        requestId:
+          type: string
+          example: req_c918a245
+    TaskListItem:
+      type: object
+      description: Task item returned in task list collections.
+      required:
+        - id
+        - prompt
+        - walletPublicKey
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          example: task_ab12cd34ef56
+        prompt:
+          type: string
+          example: Research Stellar smart contract security best practices
+        walletPublicKey:
+          type: string
+          example: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        dagJson:
+          type: string
+          description: JSON-serialized array of DAGNode objects.
+          example: '[{"nodeId":"node_research_1","agentType":"research","status":"completed"}]'
+        createdAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:00:00.000Z
+        updatedAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:05:00.000Z
+    TaskListPagination:
+      type: object
+      required:
+        - page
+        - pageSize
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 42
+        totalPages:
+          type: integer
+          example: 5
+        hasNextPage:
+          type: boolean
+          example: true
+        hasPrevPage:
+          type: boolean
+          example: false
+    TaskListResponse:
+      type: object
+      required:
+        - tasks
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskListItem"
+        pagination:
+          $ref: "#/components/schemas/TaskListPagination"
+    Agent:
+      type: object
+      required:
+        - id
+        - capabilities
+        - pricingXLM
+        - endpoint
+        - stellarPublicKey
+        - reputationScore
+        - lastSeenAt
+      properties:
+        id:
+          type: string
+          example: agent_crypto_analyst_01
+        capabilities:
+          type: array
+          items:
+            type: string
+          example:
+            - research
+            - market_analysis
+            - report
+        pricingXLM:
+          type: number
+          example: 0.25
+        endpoint:
+          type: string
+          format: uri
+          example: https://agent-crypto.example.com/api
+        stellarPublicKey:
+          type: string
+          example: GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ
+        reputationScore:
+          type: number
+          example: 98.5
+        quality_score:
+          type: number
+          description: Average composite quality score (0-100), when score history exists
+          example: 87.5
+        lastSeenAt:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:20:00.000Z
+    AgentHeartbeatResponse:
+      type: object
+      required:
+        - status
+        - agentId
+        - timestamp
+      properties:
+        status:
+          type: string
+          example: ok
+        agentId:
+          type: string
+          example: agent_crypto_analyst_01
+        timestamp:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:30:00.000Z
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - uptime
+        - version
+        - stellarNetwork
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: ok
+        uptime:
+          type: number
+          description: Process uptime in seconds
+          example: 1420
+        version:
+          type: string
+          example: 0.1.0
+        stellarNetwork:
+          type: string
+          example: testnet
+    DeepHealthStatus:
+      type: object
+      required:
+        - venice
+        - horizon
+      properties:
+        venice:
+          type: string
+          enum:
+            - ok
+            - unreachable
+          example: ok
+        horizon:
+          type: string
+          enum:
+            - ok
+            - unreachable
+          example: ok
+    ReadinessStatus:
+      type: object
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - not_ready
+          example: ready
+        checks:
+          type: object
+          properties:
+            tasks:
+              type: string
+              enum:
+                - ok
+                - error
+              example: ok
+            payments:
+              type: string
+              enum:
+                - ok
+                - error
+              example: ok
+    StatsResponse:
+      type: object
+      required:
+        - totalAgents
+        - totalTasks
+        - uptimePercent
+        - totalXLMTransacted
+        - tasksLast24h
+        - xlmLast24h
+      properties:
+        totalAgents:
+          type: integer
+          example: 12
+        totalTasks:
+          type: integer
+          example: 348
+        uptimePercent:
+          type: number
+          example: 99.98
+        totalXLMTransacted:
+          type: number
+          example: 1250.75
+        tasksLast24h:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+                example: 2026-08-25T12:00:00.000Z
+              value:
+                type: number
+                example: 45
+        xlmLast24h:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+                example: 2026-08-25T12:00:00.000Z
+              value:
+                type: number
+                example: 120.5
+    QueueStats:
+      type: object
+      required:
+        - queued
+        - active
+        - completed
+        - failed
+        - deadLetter
+      properties:
+        queued:
+          type: integer
+          example: 3
+        active:
+          type: integer
+          example: 1
+        completed:
+          type: integer
+          example: 240
+        failed:
+          type: integer
+          example: 2
+        deadLetter:
+          type: integer
+          example: 0
+    QueueJob:
+      type: object
+      required:
+        - jobId
+        - taskId
+        - status
+        - priority
+        - attempts
+        - maxAttempts
+        - createdAt
+        - updatedAt
+      properties:
+        jobId:
+          type: string
+          example: job_98fe76dc54ba
+        taskId:
+          type: string
+          example: task_ab12cd34ef56
+        status:
+          type: string
+          enum:
+            - queued
+            - active
+            - completed
+            - failed
+            - dead_letter
+          example: active
+        priority:
+          $ref: "#/components/schemas/JobPriority"
+        attempts:
+          type: integer
+          example: 1
+        maxAttempts:
+          type: integer
+          example: 3
+        nextRunAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        lockedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        lockedBy:
+          type:
+            - string
+            - "null"
+        error:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    QueueStatusResponse:
+      type: object
+      required:
+        - status
+        - stats
+      properties:
+        status:
+          type: string
+          example: healthy
+        stats:
+          $ref: "#/components/schemas/QueueStats"
+        worker:
+          type: object
+          properties:
+            running:
+              type: boolean
+              example: true
+            activeWorkers:
+              type: integer
+              example: 2
+            concurrency:
+              type: integer
+              example: 5
+            pollIntervalMs:
+              type: integer
+              example: 1000
+        activeJobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueueJob"
+        deadLetterJobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueueJob"
+    WebSocketHandshake:
+      type: object
+      required:
+        - walletPublicKey
+      properties:
+        walletPublicKey:
+          type: string
+          example: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+          description: Stellar wallet public key of the task owner
+    WebSocketHeartbeat:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - pong
+          example: pong
+    WebSocketStreamEvent:
+      type: object
+      required:
+        - type
+        - seq
+        - taskId
+        - timestamp
+      properties:
+        type:
+          type: string
+          enum:
+            - node_started
+            - node_completed
+            - payment_released
+            - task_completed
+            - task_failed
+          example: node_started
+        seq:
+          type: integer
+          example: 1
+          description: Monotonic per-task sequence number for cursor-based resumption.
+        taskId:
+          type: string
+          example: task_ab12cd34ef56
+        nodeId:
+          type: string
+          example: node_research_1
+        agentType:
+          type: string
+          example: research
+        txHash:
+          type: string
+          example: b5f7e1...mock_tx
+        timestamp:
+          type: string
+          format: date-time
+          example: 2026-08-25T17:01:00.000Z
+    ErrorPayload:
+      description: Error detail. Structured handlers emit an object with message,
+        code, correlationId and details; some legacy handlers emit a plain
+        string message.
+      oneOf:
+        - type: string
+          example: Task not found
+        - type: object
+          required:
+            - message
+          properties:
+            message:
+              type: string
+              example: "Task not found: task_123"
+            code:
+              type: string
+              example: NOT_FOUND
+            correlationId:
+              type: string
+              example: 3d00cb11-fa1b-4449-89ab-65278761da51
+            details:
+              type: object
+            timestamp:
+              type: string
+              format: date-time
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+        code:
+          type: string
+          example: INVALID_REQUEST
+        details:
+          type: object
+          description: Optional structured validation errors or error context
+    Error:
+      type: object
+      properties:
+        error:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                message:
+                  type: string
+                code:
+                  type: string
+              additionalProperties: true
+        message:
+          type: string
+        code:
+          type: string
+      additionalProperties: true
+    PaymentRecord:
+      type: object
+      required:
+        - taskId
+        - nodeId
+        - balanceId
+        - status
+        - amountStroops
+        - txHash
+      properties:
+        taskId:
+          type: string
+        nodeId:
+          type: string
+        balanceId:
+          type: string
+        status:
+          type: string
+          enum:
+            - locked
+            - released
+            - refunded
+        amountStroops:
+          type: string
+          pattern: ^[0-9]+$
+        txHash:
+          type:
+            - string
+            - "null"
+    ReconciliationReport:
+      type: object
+      required:
+        - id
+        - runAt
+        - triggeredBy
+        - status
+        - summary
+        - discrepancies
+      properties:
+        id:
+          type: string
+        runAt:
+          type: string
+          format: date-time
+        triggeredBy:
+          type: string
+          enum:
+            - manual
+            - scheduled
+            - release
+        status:
+          type: string
+          enum:
+            - consistent
+            - discrepancies_found
+        summary:
+          type: object
+          required:
+            - totalLocalRecords
+            - totalOnChainBalances
+            - matched
+            - discrepancies
+            - missingOnChain
+            - missingLocal
+            - amountMismatch
+          properties:
+            totalLocalRecords:
+              type: integer
+            totalOnChainBalances:
+              type: integer
+            matched:
+              type: integer
+            discrepancies:
+              type: integer
+            missingOnChain:
+              type: integer
+            missingLocal:
+              type: integer
+            amountMismatch:
+              type: integer
+        discrepancies:
+          type: array
+          items:
+            type: object
+            required:
+              - type
+              - balanceId
+              - severity
+              - description
+            properties:
+              type:
+                type: string
+                enum:
+                  - missing_on_chain
+                  - missing_local
+                  - amount_mismatch
+              balanceId:
+                type: string
+              taskId:
+                type: string
+              nodeId:
+                type: string
+              severity:
+                type: string
+                enum:
+                  - info
+                  - warning
+                  - critical
+              description:
+                type: string
+              localAmountStroops:
+                type: string
+              onChainAmountStroops:
+                type: string
+              expectedAmountStroops:
+                type: string
+    ContractEvent:
+      type: object
+      required:
+        - contractId
+        - eventType
+        - version
+        - payload
+        - ledgerSeq
+        - txHash
+        - occurredAt
+        - indexedAt
+      properties:
+        id:
+          type: integer
+        contractId:
+          type: string
+        eventType:
+          type: string
+        version:
+          type: integer
+        payload:
+          type: string
+        ledgerSeq:
+          type: integer
+        txHash:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        indexedAt:
+          type: string
+          format: date-time
+    ValidationError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: Validation failed
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: prompt
+              message:
+                type: string
+                example: Prompt is required
+    UnauthorizedError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+    ForbiddenError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+    NotFoundError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+    RateLimitError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+        retryAfter:
+          type: integer
+          example: 60
+    InternalServerError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+    ServiceUnavailableError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorPayload"
+    AuthTokensResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - expiresIn
+        - tokenType
+        - session
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          example: rt_8a12d3...39af
+        expiresIn:
+          type: integer
+          example: 900
+        tokenType:
+          type: string
+          example: Bearer
+        session:
+          type: object
+          required:
+            - id
+            - familyId
+            - deviceId
+            - expiresAt
+          properties:
+            id:
+              type: string
+              example: sess_uuid
+            familyId:
+              type: string
+              example: fam_uuid
+            deviceId:
+              type: string
+              example: device_macbook_pro
+            deviceName:
+              type:
+                - string
+                - "null"
+              example: Chrome on macOS
+            expiresAt:
+              type: string
+              example: 2026-09-05T12:00:00.000Z
+    TokenRefreshResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - expiresIn
+        - tokenType
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          example: rt_9b34e4...40be
+        expiresIn:
+          type: integer
+          example: 900
+        tokenType:
+          type: string
+          example: Bearer
+security:
+  - WalletAuth: []
+paths:
+  /api/versions:
+    get:
+      summary: API versioning lifecycle manifest
+      description: >
+        Lists all API versions with their deprecation status, sunset dates, and
+        breaking-change summaries. Clients should poll this endpoint to detect
+        when an in-use version has been deprecated or is near its sunset date.
+      tags:
+        - Versioning
+      security: []
+      responses:
+        "200":
+          description: Version manifest
+  /api/tasks:
+    post:
+      summary: Create and enqueue a new task
+      description: Decomposes a natural language prompt into an execution DAG,
+        persists the task, and enqueues a background job for worker execution.
+      tags:
+        - Tasks
+      security:
+        - WalletAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: UUID v4 key scoped to the wallet. Repeated requests replay the
+            original response for 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+            examples:
+              defi_research:
+                summary: DeFi Research Task
+                value:
+                  prompt: Analyze Stellar DEX liquidity trends and generate a summary report
+                  walletPublicKey: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+                  maxBudgetXLM: 5
+                  agentPreferences:
+                    - research-agent-v1
+                    - report-agent-v1
+                  priority: normal
+      responses:
+        "201":
+          description: Task successfully created and enqueued
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/X-RateLimit-Reset"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTaskResponse"
+              example:
+                taskId: task_ab12cd34ef56
+                status: queued
+                dagPreview:
+                  - nodeId: node_research_1
+                    agentType: research
+                    prompt: Analyze Stellar DEX liquidity
+                    dependsOn: []
+                    status: pending
+        "400":
+          description: Invalid request payload or prompt validation failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+              example:
+                error: Validation failed
+                details:
+                  - field: prompt
+                    message: Prompt is required
+        "429":
+          description: Rate limit or daily task limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitError"
+              example:
+                error: Daily task limit reached (max 100 per 24 hours)
+        "500":
+          description: Internal server error during task decomposition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalServerError"
+    get:
+      summary: List tasks for the authenticated wallet
+      description: Returns paginated tasks owned by the wallet specified in the
+        `walletpublickey` header with filtering and sorting support.
+      tags:
+        - Tasks
+      security:
+        - WalletAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number for pagination
+          example: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+          description: Number of tasks per page
+          example: 10
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+          description: Filter tasks by lifecycle status
+          example: completed
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum:
+              - createdAt:desc
+              - createdAt:asc
+            default: createdAt:desc
+          description: Sort order
+          example: createdAt:desc
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Substring search in prompt text
+          example: liquidity
+      responses:
+        "200":
+          description: Paginated list of tasks
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/X-RateLimit-Reset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+              example:
+                tasks:
+                  - id: task_ab12cd34ef56
+                    prompt: Analyze Stellar DEX liquidity trends
+                    walletPublicKey: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+                    status: completed
+                    dagJson: '[{"nodeId":"node_research_1","status":"completed"}]'
+                    createdAt: 2026-08-25T17:00:00.000Z
+                    updatedAt: 2026-08-25T17:05:00.000Z
+                total: 1
+                page: 1
+                pageSize: 10
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "500":
+          description: Internal server error querying task database
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalServerError"
+  "/api/tasks/{id}":
+    get:
+      summary: Get task details by ID
+      description: Fetches full task details, DAG structure, node statuses, execution
+        outputs, and transaction hashes. Caller must be the task owner.
+      tags:
+        - Tasks
+      security:
+        - WalletAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique task identifier (e.g. task_ab12cd34ef56)
+          example: task_ab12cd34ef56
+      responses:
+        "200":
+          description: Task found and returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+              example:
+                id: task_ab12cd34ef56
+                taskId: task_ab12cd34ef56
+                prompt: Analyze Stellar DEX liquidity trends
+                walletPublicKey: GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA
+                status: completed
+                dag:
+                  - nodeId: node_research_1
+                    agentType: research
+                    prompt: Analyze Stellar DEX liquidity
+                    dependsOn: []
+                    status: completed
+                    result:
+                      summary: Liquidity increased by 14%
+                    error: null
+                createdAt: 2026-08-25T17:00:00.000Z
+                updatedAt: 2026-08-25T17:05:00.000Z
+        "403":
+          description: Access denied — walletpublickey header is missing or does not match
+            task owner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForbiddenError"
+              example:
+                error: Access denied
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+              example:
+                error: Task not found
+    delete:
+      summary: Cancel a queued task
+      description: Cancels a queued task before execution begins. If the task is
+        already running or completed, returns 409 Conflict.
+      tags:
+        - Tasks
+      security:
+        - WalletAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: task_ab12cd34ef56
+      responses:
+        "200":
+          description: Task cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskId:
+                    type: string
+                    example: task_ab12cd34ef56
+                  status:
+                    type: string
+                    enum:
+                      - cancelled
+                    example: cancelled
+        "403":
+          description: Not authorized to cancel this task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForbiddenError"
+        "404":
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+        "409":
+          description: Cannot cancel task in current status (e.g. running or completed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: Cannot cancel task in 'running' status
+  "/tasks/{id}/stream":
+    get:
+      summary: WebSocket Live Task Execution Stream (ws://)
+      description: >
+        **WebSocket Endpoint:** `ws://<host>/tasks/:id/stream`
+
+        Streams real-time DAG execution events, node state transitions, and Stellar payment release hashes.
+
+        ### Handshake & Authentication: 1. Connect to `ws://<host>/tasks/:id/stream` (optionally appending `?lastEventId=<seq>` for cursor resumption). 2. Send JSON auth payload within 10 seconds: `{"walletPublicKey": "G..."}`. 3. Server verifies ownership. If wallet does not own task, connection closes with close code `4003` (Forbidden).
+
+        ### Events Received: - `node_started`: Node execution began with assigned agent. - `node_completed`: Node successfully finished. - `payment_released`: Stellar escrow payment released with txHash. - `task_completed` / `task_failed`: Task lifecycle finished.
+
+        ### Heartbeat: - Server sends periodic ping every 30s. - Client must reply with `{"type": "pong"}` within 10s.
+      tags:
+        - WebSocket Stream
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Task ID to stream
+          example: task_ab12cd34ef56
+        - in: query
+          name: lastEventId
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: Monotonic sequence number cursor to resume replay from
+          example: 4
+      responses:
+        "101":
+          description: Switching Protocols to WebSocket
+        "400":
+          description: Invalid request or malformed auth handshake payload
+        "403":
+          description: Forbidden - wallet does not own task (WS close code 4003)
+        "404":
+          description: Task not found (WS close code 4004)
+  /api/stats:
+    get:
+      summary: Get network statistics and analytics
+      description: Returns aggregated network performance metrics including total
+        registered agents, completed tasks, system uptime percentage, XLM
+        transacted, and 24-hour activity time series.
+      operationId: getStats
+      tags:
+        - Stats
+      security: []
+      responses:
+        "200":
+          description: Current network statistics retrieved successfully
+          headers:
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-RateLimit-Reset:
+              $ref: "#/components/headers/X-RateLimit-Reset"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+              example:
+                totalAgents: 12
+                totalTasks: 348
+                uptimePercent: 99.98
+                totalXLMTransacted: 1250.75
+                tasksLast24h:
+                  - timestamp: 2026-08-25T12:00:00.000Z
+                    value: 45
+                xlmLast24h:
+                  - timestamp: 2026-08-25T12:00:00.000Z
+                    value: 120.5
+        "500":
+          description: Unable to load stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalServerError"
+  /api/reconciliation/run:
+    post:
+      summary: Trigger a payment reconciliation check
+      operationId: runReconciliation
+      tags:
+        - Reconciliation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                triggeredBy:
+                  type: string
+                  enum:
+                    - manual
+                    - scheduled
+                    - release
+                  default: manual
+      responses:
+        "200":
+          description: Reconciliation report for this run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReport"
+        "500":
+          description: Reconciliation run failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/reconciliation/report:
+    get:
+      summary: Get the latest reconciliation report
+      operationId: getLatestReconciliationReport
+      tags:
+        - Reconciliation
+      responses:
+        "200":
+          description: Latest reconciliation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationReport"
+        "404":
+          description: No reconciliation report has been generated yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/payments:
+    get:
+      summary: List all payment records
+      operationId: listPayments
+      tags:
+        - Payments
+      security: []
+      description: >
+        Returns the full local payment history — every locked, released, and
+        refunded record. Records are ordered by taskId + nodeId (composite
+        primary key). This is the reconciliation source of truth for the
+        network's Stellar claimable-balance payment flow.
+      responses:
+        "200":
+          description: Rate limit status
+        "400":
+          description: Missing key parameter
+        "404":
+          description: Key not found in rate limiter cache
+  /api/payments:
+    get:
+      summary: List all payment records
+      operationId: listPayments
+      tags:
+        - Payments
+      security: []
+      description: >
+        Returns the full local payment history — every locked, released, and
+        refunded record. Records are ordered by taskId + nodeId (composite
+        primary key). This is the reconciliation source of truth for the
+        network's Stellar claimable-balance payment flow.
+      responses:
+        "200":
+          description: Payment record list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaymentRecord"
+                  total:
+                    type: integer
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /metrics:
+    get:
+      summary: Prometheus metrics endpoint
+      description: Exports system and domain metrics in Prometheus text format for scraping.
+      tags:
+        - Metrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus metric families
+          content:
+            text/plain:
+              schema:
+                type: string
+  /metrics/health:
+    get:
+      summary: Prometheus scrape health
+      description: Checks telemetry scrape reliability and registration status.
+      tags:
+        - Metrics
+      security: []
+      responses:
+        "200":
+          description: Scrape health status
+          content:
+            application/json:
+              schema:
+                type: object
+  /health:
+    get:
+      summary: Basic liveness check
+      operationId: getHealth
+      description: Returns process uptime, version, and Stellar network name. No
+        external dependency checks.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /health/live:
+    get:
+      summary: Basic liveness check
+      operationId: getLive
+      description: Alias for `GET /health` — process-only liveness, no dependency checks.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /health/deep:
+    get:
+      summary: Deep dependency health check
+      operationId: getDeepHealth
+      description: >
+        Probes external dependencies (Venice AI, Stellar Horizon) and reports
+        their individual status. Always returns 200 — dependency degradation is
+        reported in the body (`status: "degraded"`) rather than as an HTTP
+        failure, so diagnostic consumers can read full details. Readiness for
+        traffic lives on `/health/ready`.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: Dependency status report (ok or degraded)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - services
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - ok
+                      - degraded
+                    example: degraded
+                  services:
+                    type: object
+                    properties:
+                      venice:
+                        type: string
+                        enum:
+                          - ok
+                          - error
+                          - unknown
+                        example: error
+                      horizon:
+                        type: string
+                        enum:
+                          - ok
+                          - error
+                          - unknown
+                        example: ok
+                  venice:
+                    type: string
+                    enum:
+                      - ok
+                      - error
+                      - unknown
+                    example: error
+                  horizon:
+                    type: string
+                    enum:
+                      - ok
+                      - error
+                      - unknown
+                    example: ok
+  /health/ready:
+    get:
+      summary: Readiness probe
+      operationId: getReady
+      description: >
+        Returns 200 when every dependency check passes (task DB, payment DB,
+        queue, Venice AI, Horizon, WebSocket server) and 500 otherwise, so
+        orchestrators can gate traffic on readiness.
+      tags:
+        - Health
+      security: []
+      responses:
+        "200":
+          description: All dependencies ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "500":
+          description: One or more dependencies failing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+  /api/events:
+    get:
+      summary: Query indexed Soroban contract events
+      operationId: listContractEvents
+      tags:
+        - Events
+      parameters:
+        - in: query
+          name: contract
+          schema:
+            type: string
+          description: Filter by Soroban contract ID
+        - in: query
+          name: type
+          schema:
+            type: string
+          description: Filter by event type (e.g. "registry:agent_reg")
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 lower bound (inclusive) on occurred_at
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+          description: ISO-8601 upper bound (inclusive) on occurred_at
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated list of contract events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ContractEvent"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        "400":
+          description: Invalid query parameters
+  /api/events/status:
+    get:
+      summary: Return the event indexer status
+      operationId: getEventIndexerStatus
+      tags:
+        - Events
+      responses:
+        "200":
+          description: Indexer status
+  /api/auth/token:
+    post:
+      summary: Issue access and refresh token pair
+      description: Establishes a new authenticated session family for a wallet & device.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - walletPublicKey
+                - deviceId
+              properties:
+                walletPublicKey:
+                  type: string
+                deviceId:
+                  type: string
+                deviceName:
+                  type: string
+      responses:
+        "200":
+          description: Tokens issued successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokensResponse"
+  /api/auth/refresh:
+    post:
+      summary: Rotate refresh token
+      description: Exchanges an active refresh token for a new access/refresh pair.
+        Replaying a consumed refresh token revokes the entire session family.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Refreshed token pair
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenRefreshResponse"
+        "401":
+          description: Invalid, expired, or reused refresh token
+  /api/auth/revoke:
+    post:
+      summary: Revoke session
+      description: Revokes the specified or current active session.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Session revoked
+  /api/auth/revoke-all:
+    post:
+      summary: Revoke all user sessions
+      description: Revokes all active sessions across all devices for the
+        authenticated wallet.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: All sessions revoked
+  /api/auth/sessions:
+    get:
+      summary: List active sessions
+      description: Returns all active devices/sessions for the authenticated wallet.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: List of active sessions
+  /api/auth/audit-logs:
+    get:
+      summary: List auth audit logs
+      description: Returns security audit trail for compliance and intrusion detection.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Audit logs
+  /api/agents:
+    get:
+      summary: List registered agents
+      operationId: listAgents
+      tags:
+        - Agents
+      security: []
+      parameters:
+        - in: query
+          name: capability
+          schema:
+            type: string
+          description: Filter agents that support this capability
+        - in: query
+          name: minReputation
+          schema:
+            type: number
+        - in: query
+          name: maxPriceXLM
+          schema:
+            type: number
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agent"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  "/api/agents/{id}":
+    get:
+      summary: Get registered agent by ID
+      description: Fetches agent profile, capabilities, reputation score, and status
+        by unique agentId.
+      operationId: getAgent
+      tags:
+        - Agents
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique agent identifier
+          example: agent_crypto_analyst_01
+      responses:
+        "200":
+          description: Agent details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+    delete:
+      summary: Deregister an agent
+      description: >
+        Removes an agent from the registry. Requires cryptographic verification
+        of an Ed25519 signature generated with the agent's registered Stellar
+        secret key.
+      tags:
+        - Agents
+      security:
+        - AgentSignatureAuth: []
+        - AgentChallengeAuth: []
+      operationId: deleteAgent
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique agent identifier
+          example: agent_crypto_analyst_01
+        - in: header
+          name: x-signature
+          required: true
+          schema:
+            type: string
+          description: Base64-encoded Ed25519 signature of the challenge
+        - in: header
+          name: x-challenge
+          required: true
+          schema:
+            type: string
+          description: Plaintext challenge string matching the server challenge
+      responses:
+        "200":
+          description: Agent deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Agent deleted successfully
+        "401":
+          description: Missing or invalid signature/challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedError"
+              example:
+                error: Invalid signature
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+  "/api/agents/{id}/task-result":
+    post:
+      summary: Report a task outcome and update agent reputation
+      description: >
+        Applies the Issue #497 reputation update rules: success raises the score
+        based on quality and latency with a bounded bond multiplier; failure
+        applies a fixed penalty. Response includes the full reputation breakdown
+        after the update.
+      tags:
+        - Agents
+      security: []
+      operationId: recordAgentTaskResult
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: agent_crypto_analyst_01
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome
+              properties:
+                outcome:
+                  type: string
+                  enum:
+                    - success
+                    - failure
+                qualityScore:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                latencyMs:
+                  type: number
+                  minimum: 0
+      responses:
+        "200":
+          description: Reputation updated
+        "404":
+          description: Agent not found
+  "/api/agents/{id}/health":
+    get:
+      summary: Check an agent's live health/reachability
+      tags:
+        - Agents
+      security: []
+      operationId: checkAgentHealth
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: agent_crypto_analyst_01
+      responses:
+        "200":
+          description: Health check result
+        "404":
+          description: Agent not found
+  /api/agents/register:
+    post:
+      summary: Register a new specialized agent
+      tags:
+        - Agents
+      security: []
+      operationId: registerAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAgentRequest"
+      responses:
+        "201":
+          description: Agent registered successfully
+        "400":
+          description: Validation error or Stellar account verification failure
+        "429":
+          description: Registration rate limit exceeded
+  "/api/agents/{id}/heartbeat":
+    post:
+      summary: Agent heartbeat keep-alive
+      description: Updates the agent's lastSeenAt timestamp and keeps its online
+        status active.
+      tags:
+        - Agents
+      security: []
+      operationId: agentHeartbeat
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: agent_crypto_analyst_01
+      responses:
+        "200":
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentHeartbeatResponse"
+              example:
+                status: ok
+                lastSeenAt: 2026-08-25T17:30:00.000Z
+        "404":
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+        "429":
+          description: Heartbeat rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitError"
+  /api/admin/stats:
+    get:
+      summary: Platform metrics for administrators
+      description: >
+        Agent counts, task volume by status, and XLM throughput. Requires the
+        admin API key; missing or invalid keys return 403.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      responses:
+        "200":
+          description: Platform aggregates
+        "403":
+          description: Missing or invalid admin API key
+  /api/admin/tasks:
+    get:
+      summary: List all tasks with filters
+      description: Supports status, wallet, date-range and pagination filters.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - running
+              - completed
+              - failed
+              - cancelled
+        - in: query
+          name: wallet
+          schema:
+            type: string
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated task list
+        "400":
+          description: Invalid query
+        "403":
+          description: Missing or invalid admin API key
+  "/api/admin/tasks/{id}":
+    delete:
+      summary: Cancel any task
+      description: Force-cancels a task, cancels its queued job, and refunds locked
+        payments where possible.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task cancelled
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Task not found
+        "409":
+          description: Task already terminal
+  "/api/admin/agents/{id}/ban":
+    post:
+      summary: Ban an agent
+      description: >
+        Marks an agent as banned and offline so it is excluded from new task
+        assignments until unbanned.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        "200":
+          description: Agent banned
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Agent not found
+  "/api/admin/agents/{id}/unban":
+    post:
+      summary: Lift an agent ban
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent unbanned
+        "403":
+          description: Missing or invalid admin API key
+        "404":
+          description: Agent not found
+  /api/admin/logs:
+    get:
+      summary: Recent error log entries
+      description: In-memory ring buffer of the most recent error/fatal log lines.
+      tags:
+        - Admin
+      security:
+        - adminApiKey: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - in: query
+          name: level
+          schema:
+            type: string
+            enum:
+              - error
+              - fatal
+      responses:
+        "200":
+          description: Recent error log entries (newest first)
+        "400":
+          description: Invalid query
+        "403":
+          description: Missing or invalid admin API key
+  "/api/admin/traces/{id}":
+    get:
+      summary: Retrieve a distributed trace by traceId or requestId
+      operationId: getAdminTrace
+      description: >
+        Returns the correlated spans for a given traceId (correlationId) or
+        requestId. Accepts either identifier and resolves it to the trace.
+        Requires admin authentication via `X-Admin-API-Key` or `Authorization:
+        Bearer`.
+      tags:
+        - Admin
+      security:
+        - AdminApiKey: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: traceId (correlationId) or requestId to look up
+      responses:
+        "200":
+          description: Trace found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  correlationId:
+                    type: string
+                  spans:
+                    type: array
+                  startedAt:
+                    type: string
+                  endedAt:
+                    type: string
+                  totalDurationMs:
+                    type: number
+        "401":
+          description: Missing or invalid admin API key
+        "404":
+          description: No trace found for the given id
+        "503":
+          description: ADMIN_API_KEY is not configured
+  /api/admin/queue/status:
+    get:
+      summary: Get background job queue status and statistics
+      description: Returns aggregated metrics on pending, active, completed, failed,
+        and dead-letter jobs along with worker status.
+      tags:
+        - Admin
+      responses:
+        "200":
+          description: Queue status and metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStatusResponse"
+              example:
+                status: healthy
+                stats:
+                  queued: 2
+                  active: 1
+                  completed: 140
+                  failed: 1
+                  deadLetter: 0
+                worker:
+                  running: true
+                  activeWorkers: 1
+                  concurrency: 5
+                  pollIntervalMs: 1000
+                activeJobs: []
+                deadLetterJobs: []
+  /api/admin/queue/jobs:
+    get:
+      summary: List background jobs in queue
+      description: Query jobs filtered by status (queued, active, completed, failed,
+        dead_letter) or taskId with pagination.
+      tags:
+        - Admin
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - active
+              - completed
+              - failed
+              - dead_letter
+          description: Filter jobs by status
+        - in: query
+          name: taskId
+          schema:
+            type: string
+          description: Filter jobs by associated task ID
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/QueueJob"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+  /api/admin/queue/dead-letter:
+    get:
+      summary: List dead-letter jobs
+      description: Retrieves jobs that permanently failed after exhausting maximum
+        retry attempts.
+      tags:
+        - Admin
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of dead-letter jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/QueueJob"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+  "/api/admin/queue/retry/{id}":
+    post:
+      summary: Retry a dead-letter job
+      description: Resets attempt count and moves a dead-letter job back to queued
+        status for worker processing.
+      tags:
+        - Admin
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique Job ID
+          example: job_98fe76dc54ba
+      responses:
+        "200":
+          description: Job moved back to queue for retry
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Job job_98fe76dc54ba moved to pending for retry
+        "404":
+          description: Job not found or not in dead-letter state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotFoundError"
+tags: []

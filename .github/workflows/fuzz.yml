@@ -1,0 +1,184 @@
+name: Soroban Contract Fuzzing (nightly)
+
+# Nightly 30-minute cargo-fuzz run for agent_bidding, agent_registry, and
+# task_store. Any panic discovered is treated as a critical bug and fails the
+# workflow. Corpus artifacts are cached so incremental fuzzing picks up where
+# the previous run left off.
+
+on:
+  schedule:
+    # 02:00 UTC nightly — complements testnet-nightly.yml which runs at 03:17
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "smart-contracts/contracts/agent_bidding/fuzz/**"
+      - "smart-contracts/contracts/agent_registry/fuzz/**"
+      - "smart-contracts/contracts/task_store/fuzz/**"
+      - ".github/workflows/fuzz.yml"
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-C codegen-units=1"
+  # 30 minutes per fuzz target
+  FUZZ_DURATION: "1800"
+
+jobs:
+  # ── agent-bidding ─────────────────────────────────────────────────────────
+  fuzz-agent-bidding:
+    name: Fuzz agent-bidding
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install nightly Rust (required by cargo-fuzz)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts/contracts/agent_bidding
+
+      - name: Restore fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: smart-contracts/contracts/agent_bidding/fuzz/corpus
+          key: fuzz-corpus-agent-bidding-${{ github.run_id }}
+          restore-keys: fuzz-corpus-agent-bidding-
+
+      - name: Fuzz fuzz_bid_amounts (30 min)
+        working-directory: smart-contracts/contracts/agent_bidding
+        run: |
+          cargo fuzz run fuzz_bid_amounts fuzz/corpus/fuzz_bid_amounts \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=1024
+
+      - name: Fuzz fuzz_auction_params (30 min)
+        working-directory: smart-contracts/contracts/agent_bidding
+        run: |
+          cargo fuzz run fuzz_auction_params fuzz/corpus/fuzz_auction_params \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=256
+
+      - name: Fuzz fuzz_agent_ids (30 min)
+        working-directory: smart-contracts/contracts/agent_bidding
+        run: |
+          cargo fuzz run fuzz_agent_ids fuzz/corpus/fuzz_agent_ids \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=128
+
+      - name: Save fuzz corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: smart-contracts/contracts/agent_bidding/fuzz/corpus
+          key: fuzz-corpus-agent-bidding-${{ github.run_id }}
+
+  # ── agent-registry ────────────────────────────────────────────────────────
+  fuzz-agent-registry:
+    name: Fuzz agent-registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts/contracts/agent_registry
+
+      - name: Restore fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: smart-contracts/contracts/agent_registry/fuzz/corpus
+          key: fuzz-corpus-agent-registry-${{ github.run_id }}
+          restore-keys: fuzz-corpus-agent-registry-
+
+      - name: Fuzz fuzz_register_agent (30 min)
+        working-directory: smart-contracts/contracts/agent_registry
+        run: |
+          cargo fuzz run fuzz_register_agent fuzz/corpus/fuzz_register_agent \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=256
+
+      - name: Fuzz fuzz_agent_bond (30 min)
+        working-directory: smart-contracts/contracts/agent_registry
+        run: |
+          cargo fuzz run fuzz_agent_bond fuzz/corpus/fuzz_agent_bond \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=256
+
+      - name: Fuzz fuzz_agent_id_inputs (30 min)
+        working-directory: smart-contracts/contracts/agent_registry
+        run: |
+          cargo fuzz run fuzz_agent_id_inputs fuzz/corpus/fuzz_agent_id_inputs \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=128
+
+      - name: Save fuzz corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: smart-contracts/contracts/agent_registry/fuzz/corpus
+          key: fuzz-corpus-agent-registry-${{ github.run_id }}
+
+  # ── task-store ────────────────────────────────────────────────────────────
+  fuzz-task-store:
+    name: Fuzz task-store
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts/contracts/task_store
+
+      - name: Restore fuzz corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: smart-contracts/contracts/task_store/fuzz/corpus
+          key: fuzz-corpus-task-store-${{ github.run_id }}
+          restore-keys: fuzz-corpus-task-store-
+
+      - name: Fuzz fuzz_task_ids (30 min)
+        working-directory: smart-contracts/contracts/task_store
+        run: |
+          cargo fuzz run fuzz_task_ids fuzz/corpus/fuzz_task_ids \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=512
+
+      - name: Fuzz fuzz_task_status_transitions (30 min)
+        working-directory: smart-contracts/contracts/task_store
+        run: |
+          cargo fuzz run fuzz_task_status_transitions fuzz/corpus/fuzz_task_status_transitions \
+            -- -max_total_time=${{ env.FUZZ_DURATION }} -max_len=32
+
+      - name: Save fuzz corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: smart-contracts/contracts/task_store/fuzz/corpus
+          key: fuzz-corpus-task-store-${{ github.run_id }}

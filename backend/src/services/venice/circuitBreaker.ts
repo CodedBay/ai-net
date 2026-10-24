@@ -1,55 +1,20 @@
-import { CircuitOpenError } from './errors.js';
+import { VeniceCircuitBreaker, type VeniceCircuitState } from '../veniceCircuitBreaker.js';
 
-export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+export type CircuitState = VeniceCircuitState;
 
-const FAILURE_THRESHOLD = 3;
-const OPEN_DURATION_MS = 60_000;
-
-export class CircuitBreaker {
-  private state: CircuitState = 'CLOSED';
-  private failures = 0;
-  private openedAt = 0;
-  private nowFn: () => number;
-
+/** @deprecated Use VeniceCircuitBreaker. Kept for existing client integrations. */
+export class CircuitBreaker extends VeniceCircuitBreaker {
   constructor(nowFn?: () => number) {
-    this.nowFn = nowFn ?? (() => Date.now());
-  }
-
-  getState(): CircuitState {
-    this.evaluateState();
-    return this.state;
-  }
-
-  getFailureCount(): number {
-    return this.failures;
-  }
-
-  assertClosed(): void {
-    this.evaluateState();
-    if (this.state === 'OPEN') {
-      throw new CircuitOpenError();
-    }
-  }
-
-  recordSuccess(): void {
-    this.failures = 0;
-    this.state = 'CLOSED';
-  }
-
-  recordFailure(): void {
-    this.failures++;
-    if (this.failures >= FAILURE_THRESHOLD) {
-      this.state = 'OPEN';
-      this.openedAt = this.nowFn();
-    }
-  }
-
-  private evaluateState(): void {
-    if (this.state === 'OPEN') {
-      const elapsed = this.nowFn() - this.openedAt;
-      if (elapsed >= OPEN_DURATION_MS) {
-        this.state = 'HALF_OPEN';
-      }
-    }
+    super({
+      now: nowFn,
+      // Legacy contract of the original CircuitBreaker: open after 3
+      // consecutive failures, stay open for 60 s, and close on the first
+      // successful HALF_OPEN probe.  Failure counting is cumulative (no
+      // sliding window) until a success resets it.
+      failureThreshold: 3,
+      openDurationMs: 60_000,
+      halfOpenSuccessThreshold: 1,
+      failureWindowMs: Number.MAX_SAFE_INTEGER,
+    });
   }
 }

@@ -43,6 +43,20 @@ export interface PoolOptions {
   healthCheck?: boolean;
   /** Applied to every new connection, e.g. to create tables. */
   onCreate?: (db: Database.Database) => void;
+  /**
+   * Log statements at or above this duration (ms). Defaults to
+   * `SLOW_QUERY_LOG_THRESHOLD_MS` or 100ms. `0` logs every statement;
+   * a negative value disables instrumentation.
+   */
+  slowQueryThresholdMs?: number;
+  /** Test/observability hook overriding the default warn logger. */
+  onSlowQuery?: (info: SlowQueryInfo) => void;
+}
+
+/** Timing information for a statement that crossed the slow-query threshold. */
+export interface SlowQueryInfo {
+  sql: string;
+  durationMs: number;
 }
 
 /** Point-in-time view of pool utilisation. */
@@ -67,6 +81,9 @@ export interface PoolMetrics {
   averageWaitMs: number;
   /** Longest wait for a reader, in ms. */
   maxWaitMs: number;
+  acquireWaitBuckets: Record<string, number>;
+  acquireWaitCount: number;
+  acquireWaitSumSeconds: number;
 }
 
 /** A pooled SQLite database. */
@@ -103,6 +120,53 @@ export interface SqlitePool {
 export const DEFAULT_MIN_CONNECTIONS = 2;
 export const DEFAULT_MAX_CONNECTIONS = 10;
 export const DEFAULT_ACQUIRE_TIMEOUT_MS = 5_000;
+export const DEFAULT_SLOW_QUERY_THRESHOLD_MS = 100;
+
+function resolveSlowQueryThreshold(): number {
+  const raw = process.env.SLOW_QUERY_LOG_THRESHOLD_MS;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_SLOW_QUERY_THRESHOLD_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : DEFAULT_SLOW_QUERY_THRESHOLD_MS;
+}
+
+/**
+ * Wrap `db.prepare` so statement execution time is measured. Only the SQL
+ * text is logged — never bound parameters, which may contain secrets.
+ */
+function instrumentStatements(
+  db: Database.Database,
+  thresholdMs: number,
+  onSlowQuery?: (info: SlowQueryInfo) => void,
+): void {
+  if (thresholdMs < 0) return;
+
+  const originalPrepare = db.prepare.bind(db);
+  (db as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+    const statement = originalPrepare(sql);
+    return new Proxy(statement, {
+      get(target, property) {
+        const value = Reflect.get(target, property) as unknown;
+        if (typeof value !== "function") return value;
+        if (!["get", "all", "run", "iterate"].includes(String(property))) {
+          return (value as (...args: unknown[]) => unknown).bind(target);
+        }
+        return (...args: unknown[]) => {
+          const startedAt = performance.now();
+          try {
+            return (value as (...params: unknown[]) => unknown).apply(target, args);
+          } finally {
+            const durationMs = Math.round((performance.now() - startedAt) * 100) / 100;
+            if (durationMs >= thresholdMs) {
+              const info: SlowQueryInfo = { sql: sql.slice(0, 1_000), durationMs };
+              if (onSlowQuery) onSlowQuery(info);
+              else logger.warn(info, "slow query");
+            }
+          }
+        };
+      },
+    });
+  };
+}
 
 interface Waiter {
   resolve: (db: Database.Database) => void;
@@ -157,6 +221,8 @@ export function createPool(options: PoolOptions): SqlitePool {
     acquireTimeoutMs = DEFAULT_ACQUIRE_TIMEOUT_MS,
     healthCheck = true,
     onCreate,
+    slowQueryThresholdMs = resolveSlowQueryThreshold(),
+    onSlowQuery,
   } = options;
 
   if (min < 1) throw new RangeError("pool min must be at least 1");
@@ -166,6 +232,7 @@ export function createPool(options: PoolOptions): SqlitePool {
   // before any read-only handle is opened.
   const writer = new Database(filePath);
   applyPragmas(writer, false);
+  instrumentStatements(writer, slowQueryThresholdMs, onSlowQuery);
   onCreate?.(writer);
 
   const idle: Database.Database[] = [];
@@ -182,10 +249,15 @@ export function createPool(options: PoolOptions): SqlitePool {
   let failedHealthChecks = 0;
   let totalWaitMs = 0;
   let maxWaitMs = 0;
+  const acquireWaitBounds = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
+  const acquireWaitBuckets = Object.fromEntries(acquireWaitBounds.map((bound) => [String(bound), 0]));
+  let acquireWaitCount = 0;
+  let acquireWaitSumSeconds = 0;
 
   function openReader(): Database.Database {
     const db = new Database(filePath, { readonly: true });
     applyPragmas(db, true);
+    instrumentStatements(db, slowQueryThresholdMs, onSlowQuery);
     openReaders += 1;
     return db;
   }
@@ -222,6 +294,12 @@ export function createPool(options: PoolOptions): SqlitePool {
     totalAcquires += 1;
     totalWaitMs += ms;
     if (ms > maxWaitMs) maxWaitMs = ms;
+    const seconds = ms / 1000;
+    acquireWaitCount += 1;
+    acquireWaitSumSeconds += seconds;
+    for (const bound of acquireWaitBounds) {
+      if (seconds <= bound) acquireWaitBuckets[String(bound)] += 1;
+    }
   }
 
   function acquire(): Promise<Database.Database> {
@@ -313,10 +391,16 @@ export function createPool(options: PoolOptions): SqlitePool {
 
   async function read<T>(fn: (db: Database.Database) => T | PromiseLike<T>): Promise<T> {
     const db = await acquire();
+    const acquiredAt = Date.now();
+    const leakTimer = setTimeout(() => {
+      logger.warn({ filePath, heldMs: Date.now() - acquiredAt }, "database connection held for over 30 seconds");
+    }, 30_000);
+    leakTimer.unref();
     try {
       // Awaited so an async body cannot outlive the connection it is using.
       return await fn(db);
     } finally {
+      clearTimeout(leakTimer);
       release(db);
     }
   }
@@ -367,6 +451,9 @@ export function createPool(options: PoolOptions): SqlitePool {
       failedHealthChecks,
       averageWaitMs: totalAcquires === 0 ? 0 : totalWaitMs / totalAcquires,
       maxWaitMs,
+      acquireWaitBuckets: { ...acquireWaitBuckets },
+      acquireWaitCount,
+      acquireWaitSumSeconds,
     };
   }
 

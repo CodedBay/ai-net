@@ -7,7 +7,7 @@
  * dispatch/queue, etc.) and by the server entry-point (`src/index.ts`).
  */
 
-import express, { Request, Response, NextFunction } from "express";
+import express, { Request, Response } from "express";
 import { createServer, Server as HttpServer } from "http";
 import swaggerUi from "swagger-ui-express";
 
@@ -25,62 +25,55 @@ import { getGlobalJobQueue, JobWorker, type JobQueue } from "../queue";
 import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
 import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { EventStore } from "../events/eventStore";
+import { createEventStore } from "../events/eventStore";
 import {
   attachTaskStream,
   getStreamConnectionCount,
   type TaskStreamOptions,
 } from "./routes/stream";
-import { metricsMiddleware, metricsService } from "../services/metrics";
+import { attachAgentStatusStream } from "./routes/agentStatusStream";
 import type { DAGNode } from "../types/task";
-import {
-  createPaymentReleaseFn,
-  type StellarReleasePaymentFn,
-} from "../payment";
+import type { AgentRegistry } from "../types/agent";
 import { agentsRouter } from "./routes/agents";
+import { createAgentDb, getAgentDb } from "../db/agents";
+import { excludeBannedAgents } from "../services/adminPlatform";
+import { createAgentOnboardingRouter, type AgentOnboardingOptions } from "./routes/agentOnboarding";
 import { healthRouter } from "./routes/health";
 import { metricsRouter } from "./routes/metrics";
 import { createStatsRouter } from "./routes/stats";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
-import { authMiddleware } from "./middleware/auth";
+import { createPaymentsRouter } from "./routes/payments";
+import {
+  rateLimitMiddleware,
+  registerRateLimitMiddleware,
+  publicLimiter,
+  authedLimiter,
+  adminLimiter,
+} from "./middleware/rateLimit";
 import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
-import { createCorsMiddleware } from "./middleware/cors";
 import { errorHandler } from "./middleware/errorHandler";
 import { readOnlyMiddleware } from "./middleware/readOnly";
-import { registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
 import { versioningMiddleware } from "./middleware/versioning";
 import { getOpenapiJson, getOpenapiYaml, openapiSpec, swaggerUiOptions } from "./docs";
-import { agentsRouter } from "./routes/agents";
-import { createAdminRouter } from "./routes/admin";
-import { healthRouter } from "./routes/health";
-import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { createStatsRouter } from "./routes/stats";
-import { attachTaskStream, getStreamConnectionCount, type TaskStreamOptions } from "./routes/stream";
+import { createAdminQueueRouter } from "./routes/admin";
+import { createAdminManagementRouter } from "./routes/adminManagement";
+import { createEventsRouter } from "./routes/events";
 import { createV1TasksRouter } from "./routes/v1/tasks";
 import { createV2TasksRouter } from "./routes/v2/tasks";
 import { createAuthRouter } from "./routes/auth";
+import { createFlagsRouter } from "./routes/flags";
+import { createVersionsRouter } from "./routes/versions";
+import { createRateLimitRouter } from "./routes/ratelimit";
+import { createAdminRouter } from "./routes/admin";
 import { type AuthService } from "../services/auth";
 import { createLogger } from "../utils/logger";
-import { createTaskDb, getTaskDb } from "../db/tasks";
-import { ValidationError, UnauthorizedError, NotFoundError, AppError } from "../errors";
-import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
-import { createTaskJobHandler } from "../coordinator/coordinator";
-import {
-  openapiSpec,
-  swaggerUiOptions,
-  getOpenapiJson,
-  getOpenapiYaml,
-} from "./docs";
-import {
-  getGlobalJobQueue,
-  JobWorker,
-  type JobQueue,
-} from "../queue";
-import { createAdminQueueRouter } from "./routes/admin";
-import { metricsService, metricsMiddleware } from "../services/metrics";
+import { AppError } from "../errors";
+import { getConfig } from "../config";
+
+const dispatchLogger = createLogger({ module: "http-dispatch" });
 
 export interface AppOptions {
   dispatch?: DispatchFn;
@@ -96,6 +89,8 @@ export interface AppOptions {
   jobWorker?: JobWorker;
   /** Custom auth service instance */
   authService?: AuthService;
+  /** Soroban registration hook used by the guided agent onboarding flow. */
+  agentOnboarding?: AgentOnboardingOptions;
   /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
   /**
@@ -125,6 +120,12 @@ export function createApp(opts: AppOptions = {}): {
   const config = getConfig();
   const logger = createLogger({ module: "api-app" });
   const app = express();
+  const httpServer = createServer(app);
+  const eventStore: EventStore = opts.eventStore ?? eventBus.store ?? createEventStore();
+
+  if (config.NODE_ENV !== "test") {
+    void eventBus.connectRedis(config.REDIS_URL);
+  }
 
   app.use(express.json());
   app.use((_req, res, next) => {
@@ -137,7 +138,7 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestId);
   app.use(requestLogger);
   app.use(metricsMiddleware);
-  app.use(globalRateLimitMiddleware);
+  app.use(rateLimitMiddleware);
   app.use(versioningMiddleware);
   app.use(
     readOnlyMiddleware({
@@ -174,10 +175,31 @@ export function createApp(opts: AppOptions = {}): {
     heartbeatService.start();
   }
 
+  // ── API docs (Swagger UI) ──────────────────────────────────────────────────
+  app.get("/docs/swagger.json", (_req: Request, res: Response) => {
+    res.json(getOpenapiJson());
+  });
+  app.get("/docs/swagger.yaml", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/yaml");
+    res.send(getOpenapiYaml());
+  });
+  app.use(
+    "/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(openapiSpec, swaggerUiOptions),
+  );
+  app.get("/openapi.json", (_req: Request, res: Response) => {
+    res.json(openapiSpec);
+  });
+  app.get("/openapi.yaml", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/yaml");
+    res.send(getOpenapiYaml());
+  });
+
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", publicLimiter.middleware, healthRouter);
 
-  // ── Metrics routes (Issue #499) ───────────────────────────────────────────
+  // ── Metrics routes ────────────────────────────────────────────────────────
   app.use("/metrics", metricsRouter);
   app.use("/api/metrics", metricsRouter);
 
@@ -187,47 +209,52 @@ export function createApp(opts: AppOptions = {}): {
   // ── Auth routes ────────────────────────────────────────────────────────────
   app.use("/api/auth", createAuthRouter(opts.authService));
 
+  // ── Admin event replay ─────────────────────────────────────────────────────
+  app.use("/api/events", adminLimiter.middleware, createEventsRouter(eventStore));
+
   // ── Agent routes ───────────────────────────────────────────────────────────
-  // Public reads use the public limiter; registration uses the stricter
-  // per-legacy register limiter (kept for backward compatibility).
   app.use("/api/agents", publicLimiter.middleware);
   app.post("/api/agents/register", registerRateLimitMiddleware);
+  app.post("/api/agents/onboarding/start", registerRateLimitMiddleware);
+  app.use("/api/agents/onboarding", createAgentOnboardingRouter(opts.agentOnboarding));
   app.use("/api/agents", agentsRouter);
 
-  app.get("/openapi.json", (_req: Request, res: Response) => {
-    res.json(openapiSpec);
-  });
-
   // ── Task routes ────────────────────────────────────────────────────────────
-  // Authenticated task creation uses the tighter authed limiter.
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
 
   app.use("/api/tasks", authedLimiter.middleware, (req, res, next) => {
-    const apiVersion = res.locals.apiVersion || "1.0";
+    const apiVersion = (res.locals.apiVersion as string) || "1.0";
     if (apiVersion.startsWith("1.")) {
       return v1TasksRouter(req, res, next);
-    } else {
-      return v2TasksRouter(req, res, next);
     }
     return v2TasksRouter(req, res, next);
   });
 
-  // ── Prometheus metrics endpoint ──────────────────────────────────────
-  app.use("/metrics", metricsRouter);
-
   // ── Admin Queue routes ─────────────────────────────────────────────────────
+  app.use("/api/admin", createAdminRouter({ queue: jobQueue, reconciliation: opts.reconciliation }));
   app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
   app.use("/api/admin", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
 
   // ── Feature-flag admin routes (#425) ───────────────────────────────────────
   app.use("/api/admin/flags", createFlagsRouter());
 
+  // ── Admin platform management (#33) ───────────────────────────────────────
+  // Mounted after /flags so its catch-all /api/admin mount does not shadow the
+  // feature-flag router. All routes enforce the 403 admin-key contract.
+  app.use("/api/admin", adminLimiter.middleware, createAdminManagementRouter());
+
   // ── Versioning lifecycle endpoint (#426) ───────────────────────────────────
   app.use("/api/versions", createVersionsRouter());
 
+  // ── Events and payment history ─────────────────────────────────────────────
+  app.use("/api/payments", createPaymentsRouter());
+
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
+
+  // ── Rate-limit status endpoint ─────────────────────────────────────────────
+  app.use("/api/ratelimit", publicLimiter.middleware, createRateLimitRouter());
 
   app.use((_req: Request, res: Response) => {
     res.status(404).json({
@@ -238,6 +265,28 @@ export function createApp(opts: AppOptions = {}): {
   });
 
   app.use(errorHandler);
+
+  // ── WebSocket task stream ──────────────────────────────────────────────────
+  // ── Agent-status broadcast stream (ws://<host>/ws) ─────────────────────────
+  // Attached BEFORE the task stream: the task-stream upgrade handler destroys
+  // sockets for paths it doesn't own, so /ws must be claimed first.
+  const detachAgentStatusStream = attachAgentStatusStream(httpServer, {
+    eventBus,
+    heartbeatIntervalMs: config.WS_HEARTBEAT_INTERVAL_MS,
+    pongTimeoutMs: config.WS_PONG_TIMEOUT_MS,
+    getAgentSnapshot: () => {
+      try {
+        return createAgentDb(getAgentDb()).list().map((agent) => ({
+          id: agent.id,
+          capabilities: agent.capabilities,
+          status: agent.status,
+          lastSeenAt: agent.lastSeenAt,
+        }));
+      } catch {
+        return [];
+      }
+    },
+  });
 
   const detachStream = attachTaskStream({
     httpServer,
@@ -257,14 +306,11 @@ export function createApp(opts: AppOptions = {}): {
   }));
 
   function close(callback?: () => void): void {
-    // Drain first: wait for in-flight jobs to finish (bounded by
-    // jobWorkerStopTimeoutMs) before we stop accepting connections. A job
-    // still active when the drain window elapses is NOT force-failed — it
-    // stays "active" in the store and is picked back up by the next
-    // JobWorker.start() via recoverIncompleteJobs().
     jobWorker.stop(opts.jobWorkerStopTimeoutMs ?? 10_000).finally(() => {
       heartbeatService.stop();
+      eventBus.disconnectRedis();
       metricsService.setWebSocketProbe(null);
+      detachAgentStatusStream();
       detachStream();
       if (httpServer.listening) {
         httpServer.close(callback);
@@ -282,10 +328,6 @@ export function createApp(opts: AppOptions = {}): {
 /**
  * Build a DispatchFn that looks up the cheapest agent for a node's type in the
  * provided registry and forwards the call to that agent via HTTP.
- *
- * If no registry is provided (e.g. during tests that supply their own dispatch)
- * the returned function throws a clear error so misconfiguration is obvious at
- * runtime rather than producing a silent no-op.
  */
 function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
   return async (_taskId: string, node: DAGNode, context: string): Promise<unknown> => {
@@ -300,7 +342,17 @@ function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
       throw new AppError(`No agent registered for type: ${node.type}`, 500, "AGENT_NOT_FOUND");
     }
 
-    const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];
+    // Admin-banned agents are excluded from all new task assignments (#33).
+    const eligible = excludeBannedAgents(agents);
+    if (eligible.length === 0) {
+      throw new AppError(
+        `All agents for type ${node.type} are banned`,
+        503,
+        "NO_ELIGIBLE_AGENT",
+      );
+    }
+
+    const agent = [...eligible].sort((a, b) => a.cost - b.cost)[0];
     return httpDispatch(agent, node.nodeId, node, context);
   };
 }

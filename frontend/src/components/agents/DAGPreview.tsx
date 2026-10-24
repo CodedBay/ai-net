@@ -8,7 +8,6 @@ import ReactFlow, {
   ConnectionLineType,
   Edge,
   MarkerType,
-  MiniMapNodeProps,
   Node,
   NodeProps,
   Position,
@@ -49,16 +48,16 @@ export interface PreviewNodeData {
 // ─── Capability colour map ──────────────────────────────────────────────────
 
 const CAPABILITY_COLORS: Record<string, string> = {
-  research: '#38bdf8',
-  risk:     '#f59e0b',
-  coding:   '#a78bfa',
-  design:   '#34d399',
-  report:   '#fb7185',
+  research: 'var(--accent-info)',
+  risk: 'var(--status-warning)',
+  coding: 'var(--accent-text-strong)',
+  design: 'var(--status-success)',
+  report: 'var(--status-danger)',
 };
 
 function capabilityColor(capability?: string): string {
-  if (!capability) return '#8b5cf6';
-  return CAPABILITY_COLORS[capability.toLowerCase()] ?? '#8b5cf6';
+  if (!capability) return 'var(--accent)';
+  return CAPABILITY_COLORS[capability.toLowerCase()] ?? 'var(--accent)';
 }
 
 // ─── Tooltip component ──────────────────────────────────────────────────────
@@ -192,9 +191,8 @@ function FitViewButton() {
 
 // ─── MiniMap node coloring ──────────────────────────────────────────────────
 
-function miniMapNodeColor(node: MiniMapNodeProps): string {
-  const data = node.data as PreviewNodeData | undefined;
-  return capabilityColor(data?.capability ?? data?.label);
+function miniMapNodeColor(node: Node<PreviewNodeData>): string {
+  return capabilityColor(node.data.capability ?? node.data.label);
 }
 
 // ─── Main component (needs Provider for useReactFlow) ───────────────────────
@@ -243,7 +241,7 @@ function DAGPreviewInner({ nodes, edges }: InnerProps) {
         target: edge.target,
         animated: true,
         type: 'smoothstep',
-        style: { stroke: '#4b5563', strokeWidth: 2 },
+        style: { stroke: 'var(--border-strong)', strokeWidth: 2 },
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: 'var(--text-secondary)',
@@ -291,10 +289,10 @@ function DAGPreviewInner({ nodes, edges }: InnerProps) {
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: false }}
       >
-        {/* Dot-grid background matching dark theme */}
+        {/* Dot-grid background adapts to the active theme. */}
         <Background
           variant={BackgroundVariant.Dots}
-          color="#1e293b"
+          color="var(--surface-elevated)"
           gap={20}
           size={1}
         />
@@ -309,7 +307,7 @@ function DAGPreviewInner({ nodes, edges }: InnerProps) {
         {/* Mini-map for large graphs */}
         <MiniMap
           nodeColor={miniMapNodeColor}
-          maskColor="rgba(10, 14, 20, 0.8)"
+          maskColor="var(--surface-backdrop)"
           className={styles.minimap}
           aria-label={t('agent.dag.minimap')}
           data-testid="dag-minimap"

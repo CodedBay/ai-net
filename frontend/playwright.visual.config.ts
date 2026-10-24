@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import '@percy/playwright/dropin';
 
 /**
  * Visual-regression config, kept separate from `playwright.config.ts`
@@ -21,12 +22,15 @@ export default defineConfig({
   reporter: [
     ['html', { outputFolder: 'playwright-report-visual', open: 'never' }],
     ['list'],
+    ['@percy/playwright/dropin/reporter', { gate: 'fail-on-changes' }],
   ],
   expect: {
-    // Small threshold for anti-aliasing/font-rendering noise between runs;
-    // anything above this is treated as a real visual regression.
+    // Global threshold: 1% pixel-diff ceiling for all surfaces.
+    // Anti-aliasing / sub-pixel jitter is typically < 0.2%; 1% gives enough
+    // headroom without masking real layout regressions.
+    // Each screenshot assertion also declares this threshold explicitly.
     toHaveScreenshot: {
-      maxDiffPixelRatio: 0.02,
+      maxDiffPixelRatio: 0.01,
       animations: 'disabled',
     },
   },

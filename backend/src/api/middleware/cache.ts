@@ -79,7 +79,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
 
     // ── 2. Build cache key ────────────────────────────────────────────────
     const extra = keyExtra ? keyExtra(req) : '';
-    const fullPath = req.baseUrl + req.path;
+    const fullPath = (req.baseUrl ?? '') + req.path;
     const baseKey = buildCacheKey(req.method, fullPath, req.query as Record<string, unknown>);
     const cacheKey = extra ? `${baseKey}:${extra}` : baseKey;
 

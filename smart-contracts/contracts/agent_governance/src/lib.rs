@@ -39,11 +39,17 @@ pub use errors::Error;
 pub use types::{
     voting_power, AgentInfo, DataKey, Proposal, ProposalCreatedEvent, ProposalExecutedEvent,
     ProposalFailedEvent, ProposalStatus, ProposalType, VoteCastEvent, VoteChoice, VoteRecord,
-    BPS_DENOMINATOR, DEFAULT_VOTING_PERIOD_SECS, MAJORITY_BPS, MAX_REPUTATION,
+    VotingStartedEvent, QuorumReachedEvent, QuorumFailedEvent,
+    BPS_DENOMINATOR, DEFAULT_VOTING_PERIOD_SECS, DEFAULT_VOTING_PERIOD_LEDGERS, DEFAULT_QUORUM_THRESHOLD_BPS,
+    MAJORITY_BPS, MAX_REPUTATION,
     MAX_VOTING_PERIOD_SECS, MIN_VOTING_PERIOD_SECS, QUORUM_BPS, REPUTATION_POWER_UNIT,
+    // Timelock exports
+    ChangeProposedEvent, ChangeExecutedEvent, ChangeCancelledEvent, GuardianApprovalEvent,
+    GuardianConfig, PendingChange, TimelockKey,
+    CHANGE_EXPIRY_LEDGERS, DEFAULT_GUARDIAN_THRESHOLD, DEFAULT_GUARDIAN_SET_SIZE, MIN_DELAY_LEDGERS,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, String, Symbol, Vec};
 
 // ─── TTL constants (mirrored from agent_registry) ────────────────────────────
 
@@ -260,6 +266,14 @@ impl AgentGovernanceContract {
             + 1;
 
         let now = env.ledger().timestamp();
+        let start_ledger = env.ledger().sequence();
+        let period_ledgers: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::VotingPeriodLedgers)
+            .unwrap_or(DEFAULT_VOTING_PERIOD_LEDGERS);
+        let end_ledger = start_ledger.saturating_add(period_ledgers);
+
         let proposal = Proposal {
             id,
             proposer: proposer.clone(),
@@ -273,6 +287,8 @@ impl AgentGovernanceContract {
             against_power: 0,
             abstain_power: 0,
             total_power_snapshot: snapshot,
+            voting_start_ledger: start_ledger,
+            voting_end_ledger: end_ledger,
         };
 
         let key = DataKey::Proposal(id);
@@ -284,10 +300,20 @@ impl AgentGovernanceContract {
             (symbol_short!("gov"), symbol_short!("created")),
             ProposalCreatedEvent {
                 id,
-                proposer,
+                proposer: proposer.clone(),
                 proposal_type,
                 voting_ends_at: proposal.voting_ends_at,
                 total_power_snapshot: snapshot,
+            },
+        );
+
+        env.events().publish(
+            (Symbol::new(&env, "voting_started"),),
+            VotingStartedEvent {
+                proposal_id: id,
+                proposer,
+                voting_start_ledger: start_ledger,
+                voting_end_ledger: end_ledger,
             },
         );
 
@@ -384,7 +410,10 @@ impl AgentGovernanceContract {
         if proposal.status != ProposalStatus::Active {
             return Err(Error::ProposalFinalized);
         }
-        if env.ledger().timestamp() < proposal.voting_ends_at {
+        let seq = env.ledger().sequence();
+        let time = env.ledger().timestamp();
+        // Voting period check: must have ended in both sequence and timestamp
+        if seq <= proposal.voting_end_ledger && time < proposal.voting_ends_at {
             return Err(Error::VotingPeriodActive);
         }
 
@@ -394,17 +423,59 @@ impl AgentGovernanceContract {
             .saturating_add(proposal.abstain_power);
         let decisive_power = proposal.for_power.saturating_add(proposal.against_power);
 
-        // Quorum: cast_power / snapshot >= QUORUM_BPS / BPS_DENOMINATOR.
+        let quorum_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::QuorumThresholdBps)
+            .unwrap_or(DEFAULT_QUORUM_THRESHOLD_BPS);
+        let quorum_needed = (proposal.total_power_snapshot.saturating_mul(quorum_bps)) / BPS_DENOMINATOR;
         let quorum_met = proposal.total_power_snapshot > 0
             && cast_power.saturating_mul(BPS_DENOMINATOR)
-                >= proposal.total_power_snapshot.saturating_mul(QUORUM_BPS);
+                >= proposal.total_power_snapshot.saturating_mul(quorum_bps);
 
         // Majority: for_power / decisive_power > MAJORITY_BPS / BPS_DENOMINATOR.
         let majority_met = decisive_power > 0
             && proposal.for_power.saturating_mul(BPS_DENOMINATOR)
                 > decisive_power.saturating_mul(MAJORITY_BPS);
 
-        let passed = quorum_met && majority_met;
+        if !quorum_met {
+            proposal.status = ProposalStatus::QuorumFailed;
+            env.storage().persistent().set(&prop_key, &proposal);
+            extend_ttl_for_key(&env, &prop_key);
+
+            env.events().publish(
+                (Symbol::new(&env, "quorum_failed"),),
+                QuorumFailedEvent {
+                    proposal_id,
+                    total_voted: cast_power,
+                    quorum_needed,
+                },
+            );
+
+            env.events().publish(
+                (symbol_short!("gov"), symbol_short!("failed")),
+                ProposalFailedEvent {
+                    id: proposal_id,
+                    quorum_met: false,
+                    majority_met,
+                    for_power: proposal.for_power,
+                    against_power: proposal.against_power,
+                    abstain_power: proposal.abstain_power,
+                },
+            );
+
+            return Ok(proposal.status);
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "quorum_reached"),),
+            QuorumReachedEvent {
+                proposal_id,
+                total_voted: cast_power,
+            },
+        );
+
+        let passed = majority_met;
         proposal.status = if passed {
             ProposalStatus::Executed
         } else {
@@ -428,8 +499,8 @@ impl AgentGovernanceContract {
                 (symbol_short!("gov"), symbol_short!("failed")),
                 ProposalFailedEvent {
                     id: proposal_id,
-                    quorum_met,
-                    majority_met,
+                    quorum_met: true,
+                    majority_met: false,
                     for_power: proposal.for_power,
                     against_power: proposal.against_power,
                     abstain_power: proposal.abstain_power,
@@ -438,6 +509,51 @@ impl AgentGovernanceContract {
         }
 
         Ok(proposal.status)
+    }
+
+    /// Configure proposal voting period in ledgers (Issue #408).
+    pub fn set_voting_period_ledgers(env: Env, period: u32) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::VotingPeriodLedgers, &period);
+        Ok(())
+    }
+
+    /// Query configured voting period in ledgers.
+    pub fn get_voting_period_ledgers(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::VotingPeriodLedgers)
+            .unwrap_or(DEFAULT_VOTING_PERIOD_LEDGERS)
+    }
+
+    /// Configure quorum threshold in basis points (Issue #408).
+    pub fn set_quorum_threshold_bps(env: Env, bps: u32) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::QuorumThresholdBps, &(bps as i128));
+        Ok(())
+    }
+
+    /// Query configured quorum threshold in basis points.
+    pub fn get_quorum_threshold_bps(env: Env) -> u32 {
+        let bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::QuorumThresholdBps)
+            .unwrap_or(DEFAULT_QUORUM_THRESHOLD_BPS);
+        bps as u32
+    }
+
+    /// Configure platform_config contract address (Issue #408).
+    pub fn set_platform_config(env: Env, platform_config: Address) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::PlatformConfig, &platform_config);
+        Ok(())
     }
 
     // ── View functions ──────────────────────────────────────────────────
@@ -470,6 +586,336 @@ impl AgentGovernanceContract {
             .instance()
             .get(&DataKey::ProposalCount)
             .unwrap_or(0)
+    }
+
+    // ── Timelock: parameter-change proposals ─────────────────────────────────
+
+    /// Configure the timelock module. Must be called by the admin after
+    /// `initialize`. Subsequent calls by the admin can update the minimum delay.
+    ///
+    /// * `min_delay_ledgers` — `None` uses [`MIN_DELAY_LEDGERS`] (48).
+    pub fn initialize_timelock(
+        env: Env,
+        admin: Address,
+        min_delay_ledgers: Option<u32>,
+    ) -> Result<(), Error> {
+        require_initialized(&env)?;
+        // Must be called by the current admin.
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if stored_admin != admin {
+            return Err(Error::Unauthorized);
+        }
+        admin.require_auth();
+
+        let delay = min_delay_ledgers.unwrap_or(MIN_DELAY_LEDGERS);
+        env.storage()
+            .instance()
+            .set(&TimelockKey::MinDelay, &delay);
+        Ok(())
+    }
+
+    /// Set the guardian multi-sig configuration (admin only).
+    ///
+    /// * `guardians` — list of trusted guardian addresses (at least 1).
+    /// * `threshold` — minimum approvals required for emergency fast-track
+    ///   (must be `>= 1` and `<= guardians.len()`).
+    pub fn set_guardian_config(
+        env: Env,
+        caller: Address,
+        guardians: Vec<Address>,
+        threshold: u32,
+    ) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != caller {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        if threshold == 0 || threshold > guardians.len() {
+            return Err(Error::ZeroVotingPower); // reuse: invalid threshold
+        }
+
+        let config = GuardianConfig { guardians, threshold };
+        env.storage()
+            .instance()
+            .set(&TimelockKey::GuardianConfig, &config);
+        Ok(())
+    }
+
+    /// Propose a protocol parameter change.
+    ///
+    /// The proposer must be the admin. The `execute_after_ledger` must be at
+    /// least `current_ledger + min_delay_ledgers`. Returns the new change id.
+    ///
+    /// The pending change record is stored in **Temporary storage** with a TTL
+    /// of [`CHANGE_EXPIRY_LEDGERS`] (200 ledgers). If not executed or cancelled
+    /// within that window the record expires automatically.
+    pub fn propose_change(
+        env: Env,
+        proposer: Address,
+        parameter: Symbol,
+        execute_after_ledger: u32,
+    ) -> Result<u32, Error> {
+        require_initialized(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != proposer {
+            return Err(Error::Unauthorized);
+        }
+        proposer.require_auth();
+
+        let current_ledger = env.ledger().sequence();
+        let min_delay: u32 = env
+            .storage()
+            .instance()
+            .get(&TimelockKey::MinDelay)
+            .unwrap_or(MIN_DELAY_LEDGERS);
+
+        if execute_after_ledger < current_ledger.saturating_add(min_delay) {
+            return Err(Error::InvalidDelay);
+        }
+
+        // Allocate a new change id.
+        let change_id: u32 = env
+            .storage()
+            .instance()
+            .get(&TimelockKey::ChangeCount)
+            .unwrap_or(0u32)
+            + 1;
+        env.storage()
+            .instance()
+            .set(&TimelockKey::ChangeCount, &change_id);
+
+        let change = PendingChange {
+            id: change_id,
+            parameter: parameter.clone(),
+            proposer: proposer.clone(),
+            execute_after_ledger,
+            executed: false,
+            cancelled: false,
+            guardian_approvals: 0,
+        };
+
+        let key = TimelockKey::PendingChange(change_id);
+        env.storage().temporary().set(&key, &change);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, CHANGE_EXPIRY_LEDGERS - 1, CHANGE_EXPIRY_LEDGERS);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("chg_prop")),
+            ChangeProposedEvent {
+                change_id,
+                parameter,
+                proposer,
+                execute_after_ledger,
+            },
+        );
+
+        Ok(change_id)
+    }
+
+    /// Execute a pending parameter change (admin only).
+    ///
+    /// Callable only after `execute_after_ledger` has passed **or** when the
+    /// guardian threshold has been reached (emergency fast-track).
+    pub fn execute_change(env: Env, executor: Address, change_id: u32) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != executor {
+            return Err(Error::Unauthorized);
+        }
+        executor.require_auth();
+
+        let key = TimelockKey::PendingChange(change_id);
+        let mut change: PendingChange = env
+            .storage()
+            .temporary()
+            .get(&key)
+            .ok_or(Error::ChangeNotFound)?;
+
+        if change.executed {
+            return Err(Error::ChangeAlreadyExecuted);
+        }
+        if change.cancelled {
+            return Err(Error::ChangeAlreadyCancelled);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        let emergency = change.guardian_approvals >= {
+            let cfg: Option<GuardianConfig> = env
+                .storage()
+                .instance()
+                .get(&TimelockKey::GuardianConfig);
+            cfg.map(|c| c.threshold).unwrap_or(DEFAULT_GUARDIAN_THRESHOLD)
+        };
+
+        if !emergency && current_ledger < change.execute_after_ledger {
+            return Err(Error::TimelockActive);
+        }
+
+        change.executed = true;
+        env.storage().temporary().set(&key, &change);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("chg_exec")),
+            ChangeExecutedEvent {
+                change_id,
+                parameter: change.parameter,
+                executor,
+                emergency,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Cancel a pending parameter change (admin only).
+    ///
+    /// Can be called at any time while the change has not been executed —
+    /// including before the timelock elapses.
+    pub fn cancel_change(env: Env, canceller: Address, change_id: u32) -> Result<(), Error> {
+        require_initialized(&env)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        if admin != canceller {
+            return Err(Error::Unauthorized);
+        }
+        canceller.require_auth();
+
+        let key = TimelockKey::PendingChange(change_id);
+        let mut change: PendingChange = env
+            .storage()
+            .temporary()
+            .get(&key)
+            .ok_or(Error::ChangeNotFound)?;
+
+        if change.executed {
+            return Err(Error::ChangeAlreadyExecuted);
+        }
+        if change.cancelled {
+            return Err(Error::ChangeAlreadyCancelled);
+        }
+
+        change.cancelled = true;
+        env.storage().temporary().set(&key, &change);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("chg_canc")),
+            ChangeCancelledEvent {
+                change_id,
+                parameter: change.parameter,
+                canceller,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// A guardian submits an emergency approval for a pending change.
+    ///
+    /// Once the number of approvals reaches the configured threshold, the
+    /// change can be executed immediately via `execute_change` without waiting
+    /// for `execute_after_ledger`.
+    pub fn guardian_approve(env: Env, guardian: Address, change_id: u32) -> Result<(), Error> {
+        require_initialized(&env)?;
+        guardian.require_auth();
+
+        // Verify guardian is a member of the configured set.
+        let cfg: GuardianConfig = env
+            .storage()
+            .instance()
+            .get(&TimelockKey::GuardianConfig)
+            .ok_or(Error::GuardianSetNotConfigured)?;
+
+        if !cfg.guardians.contains(&guardian) {
+            return Err(Error::NotGuardian);
+        }
+
+        // Check no duplicate approval.
+        let approval_key = TimelockKey::GuardianApproval(change_id, guardian.clone());
+        if env.storage().temporary().has(&approval_key) {
+            return Err(Error::AlreadyApprovedByGuardian);
+        }
+
+        // Record the approval.
+        env.storage().temporary().set(&approval_key, &true);
+        env.storage()
+            .temporary()
+            .extend_ttl(&approval_key, CHANGE_EXPIRY_LEDGERS - 1, CHANGE_EXPIRY_LEDGERS);
+
+        // Increment approval count on the pending change.
+        let change_key = TimelockKey::PendingChange(change_id);
+        let mut change: PendingChange = env
+            .storage()
+            .temporary()
+            .get(&change_key)
+            .ok_or(Error::ChangeNotFound)?;
+
+        if change.executed {
+            return Err(Error::ChangeAlreadyExecuted);
+        }
+        if change.cancelled {
+            return Err(Error::ChangeAlreadyCancelled);
+        }
+
+        change.guardian_approvals = change.guardian_approvals.saturating_add(1);
+        env.storage().temporary().set(&change_key, &change);
+        env.storage()
+            .temporary()
+            .extend_ttl(&change_key, CHANGE_EXPIRY_LEDGERS - 1, CHANGE_EXPIRY_LEDGERS);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("grd_appr")),
+            GuardianApprovalEvent {
+                change_id,
+                guardian,
+                total_approvals: change.guardian_approvals,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Return a pending change record, if it still exists in Temporary storage.
+    pub fn get_pending_change(env: Env, change_id: u32) -> Option<PendingChange> {
+        env.storage()
+            .temporary()
+            .get(&TimelockKey::PendingChange(change_id))
+    }
+
+    /// Return the current guardian configuration, if set.
+    pub fn get_guardian_config(env: Env) -> Option<GuardianConfig> {
+        env.storage()
+            .instance()
+            .get(&TimelockKey::GuardianConfig)
+    }
+
+    /// Return the configured minimum timelock delay in ledgers.
+    pub fn get_min_delay(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&TimelockKey::MinDelay)
+            .unwrap_or(MIN_DELAY_LEDGERS)
     }
 }
 

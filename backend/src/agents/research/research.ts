@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { VeniceClient, type VeniceClientLike } from '../../services/venice/index.js';
 import type { AgentTask, AgentResult, AgentError, Source } from './types';
 import { getConfig } from '../../config/index.js';
+import { createLogger } from '../../utils/logger';
+
+const logger = createLogger({ component: 'research-agent-registration' });
 
 const SourceSchema = z.object({
   url: z.string().url(),
@@ -135,14 +138,12 @@ export class ResearchAgent {
         body,
       });
       if (!response.ok) {
-        console.warn(
-          `[ResearchAgent] Registration returned non-2xx status: ${response.status}`
-        );
+        logger.warn({ status: response.status }, 'research agent registration returned non-2xx status');
       } else {
-        console.info('[ResearchAgent] Successfully registered with capability "research".');
+        logger.info('research agent registered successfully');
       }
     } catch (err) {
-      console.warn('[ResearchAgent] Could not reach registry to self-register:', err instanceof Error ? err.message : 'unknown');
+      logger.warn({ err }, 'research agent could not reach registry to self-register');
     }
   }
 

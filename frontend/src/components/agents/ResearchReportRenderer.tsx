@@ -1,70 +1,28 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneLight, vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ResearchReportResult } from '../../types/agent';
 import { getMarkdown } from '../../utils/agentUtils';
+import ThemeContext from '../../context/ThemeContext';
 import CopyButton from '../common/CopyButton';
 import CollapsibleSection from '../common/CollapsibleSection';
+import { useLightbox } from '../../hooks/useLightbox';
+import type { LightboxImage } from '../../hooks/useLightbox';
+import { ImageLightbox } from '../common/ImageLightbox';
+import '../../styles/report.css';
 
 interface Props {
   result: ResearchReportResult | null | undefined;
   searchQuery?: string;
 }
 
-interface Heading {
-  level: number;
-  text: string;
-  id: string;
-}
-
-const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
+const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
+  const { effectiveTheme } = useContext(ThemeContext);
   const markdown = getMarkdown(result);
-  const [headings, setHeadings] = useState<Heading[]>([]);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!contentRef.current) return;
-
-    const headingElements = contentRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6');
-    const headingList: Heading[] = [];
-    let h2Count = 0;
-    let h3Count = 0;
-
-    headingElements.forEach((heading, idx) => {
-      const level = parseInt(heading.tagName[1]);
-      const text = heading.textContent || '';
-      const id = `heading-${idx}`;
-
-      if (level === 2) {
-        h2Count++;
-        h3Count = 0;
-        heading.textContent = `${h2Count}. ${text}`;
-      } else if (level === 3) {
-        h3Count++;
-        heading.textContent = `${h2Count}.${h3Count} ${text}`;
-      }
-
-      heading.id = id;
-      heading.classList.add('report-heading');
-
-      const link = document.createElement('a');
-      link.href = `#${id}`;
-      link.className = 'heading-anchor';
-      link.setAttribute('aria-label', `Link to ${text}`);
-      link.innerHTML = '🔗';
-      heading.appendChild(link);
-
-      if (level <= 3) {
-        headingList.push({ level, text, id });
-      }
-    });
-
-    setHeadings(headingList);
-  }, [markdown]);
 
   if (!markdown) {
     return (
@@ -113,7 +71,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
       id="research-markdown"
       data-testid="research-markdown"
       style={{
-        color: 'var(--surface-primary)',
+        color: 'var(--text-primary)',
         lineHeight: '1.7',
         fontSize: '1rem',
       }}
@@ -132,8 +90,8 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                     margin: '16px 0',
                     borderRadius: '8px',
                     overflow: 'hidden',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    backgroundColor: '#1e1e1e',
+                    border: '1px solid var(--border-muted)',
+                    backgroundColor: 'var(--surface-primary)',
                   }}
                   data-testid="code-block"
                 >
@@ -143,18 +101,18 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '6px 12px',
-                      background: 'rgba(255, 255, 255, 0.04)',
-                      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      background: 'var(--surface-hover-subtle)',
+                      borderBottom: '1px solid var(--border-muted)',
                     }}
                   >
-                    <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: '#94a3b8' }}>
+                    <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
                       {match[1]}
                     </span>
                     <CopyButton text={codeString} label="Copy" />
                   </div>
                   <SyntaxHighlighter
                     language={match[1]}
-                    style={vscDarkPlus}
+                    style={effectiveTheme === 'dark' ? vscDarkPlus : oneLight}
                     customStyle={{ margin: 0, padding: '16px', fontSize: '0.85rem' }}
                   >
                     {codeString}
@@ -166,7 +124,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               <code
                 className={className}
                 style={{
-                  background: 'rgba(255, 255, 255, 0.1)',
+                  background: 'var(--surface-hover)',
                   padding: '2px 6px',
                   borderRadius: '4px',
                   fontFamily: 'monospace',
@@ -178,6 +136,19 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               </code>
             );
           },
+          img({ src, alt, title }: { src?: string; alt?: string; title?: string }) {
+            const imageIndex = images.findIndex((image) => image.url === src);
+            return (
+              <button
+                type="button"
+                onClick={() => lightbox.openLightbox(images, Math.max(imageIndex, 0))}
+                aria-label={`Open image: ${alt || title || 'report image'}`}
+                style={{ display: 'block', maxWidth: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'zoom-in' }}
+              >
+                <img src={src} alt={alt ?? ''} title={title} style={{ maxWidth: '100%', height: 'auto' }} />
+              </button>
+            );
+          },
           a({ href, children }: any) {
             return (
               <a
@@ -185,7 +156,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="external-link"
-                style={{ color: 'var(--accent-cyan, #38bdf8)', textDecoration: 'underline' }}
+                style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}
               >
                 {children}
               </a>
@@ -198,7 +169,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                   style={{
                     width: '100%',
                     borderCollapse: 'collapse',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    border: '1px solid var(--border-muted)',
                     borderRadius: '8px',
                     overflow: 'hidden',
                   }}
@@ -212,7 +183,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
             return (
               <tr
                 style={{
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                  borderBottom: '1px solid var(--border-muted)',
                 }}
                 className="markdown-tr"
                 {...props}
@@ -226,8 +197,8 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               <th
                 style={{
                   padding: '10px 14px',
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  color: 'var(--text-primary, #f5f7fa)',
+                  background: 'var(--surface-hover)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
                   textAlign: 'left',
                 }}
@@ -241,7 +212,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               <td
                 style={{
                   padding: '10px 14px',
-                  color: 'var(--text-primary, #f5f7fa)',
+                  color: 'var(--text-primary)',
                   fontSize: '0.9rem',
                 }}
               >
@@ -254,6 +225,24 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
         {markdown}
       </ReactMarkdown>
     </div>
+      <ImageLightbox
+        isOpen={lightbox.isOpen}
+        images={lightbox.images}
+        currentIndex={lightbox.currentIndex}
+        scale={lightbox.scale}
+        position={lightbox.position}
+        onClose={lightbox.closeLightbox}
+        onPrev={lightbox.prevImage}
+        onNext={lightbox.nextImage}
+        onSelectIndex={lightbox.setIndex}
+        onZoomIn={lightbox.zoomIn}
+        onZoomOut={lightbox.zoomOut}
+        onResetZoom={lightbox.resetZoom}
+        onWheel={lightbox.handleWheel}
+        onPinch={lightbox.handlePinch}
+        onPositionChange={lightbox.setPosition}
+      />
+    </>
   );
 
   if (isLongReport) {

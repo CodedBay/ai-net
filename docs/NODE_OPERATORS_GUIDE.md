@@ -2,6 +2,8 @@
 
 Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provides step-by-step instructions for provisioning, configuring, deploying, funding, operating, and monitoring a production-ready or testnet payment and agent coordination node on the **Stellar blockchain**.
 
+For agent bond accounting, current contract limitations, and illustrative sizing guidance, see the [Staking Guide](STAKING_GUIDE.md).
+
 ---
 
 ## Table of Contents
@@ -47,7 +49,7 @@ An **ai-net Node** is an autonomous coordination daemon that connects AI agents 
 ### Node Roles
 
 - **Coordinator Node**: Accepts user workflow requests, decomposes tasks into a directed acyclic graph (DAG), matches specialized agents via the on-chain Registry, and coordinates execution.
-- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and enforce SLA bonds.
+- **Payment & Escrow Relayer**: Interacts with the `payment_escrow` and `agent_registry` Soroban contracts to lock escrow funds, release payments upon task completion, and track agent SLA bond accounting.
 - **Specialized Agent Worker**: Runs dedicated reasoning workers (Research, Coding, Design, Risk, Report) communicating with LLM inference engines.
 
 ---
@@ -232,12 +234,22 @@ Check that the balance is loaded:
 curl "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" | jq '.balances'
 ```
 
-### Step 6.3: Escrow Liquidity Guidelines
+### Step 6.3: Agent Staking & Bond Management
+
+Agent registration records a declared bond amount in the `agent_registry` contract; the current contract does not escrow XLM for it. For contract limitations, minimums, slash accounting, cooldown, CLI commands, and illustrative economics, see the **[Staking Guide](STAKING_GUIDE.md)**.
+
+Key points:
+- Default global minimum: **10 XLM** (`100,000,000` stroops), configurable by the contract admin; query `get_min_bond` before registration.
+- The registry records this amount but does not transfer or hold XLM. No economist-reviewed capability-specific recommendation is currently available.
+- A failing SLA check reduces the recorded amount by 10%; an admin can also invoke `slash_bond`. The contract has no automatic repeated-violation freeze threshold.
+- Deregistration uses a two-call process with a 17,280-ledger cooldown. The second call emits a bond-return event but does not transfer XLM.
+
+### Step 6.4: Escrow Liquidity Guidelines
 
 - **Base Reserve**: Keep at least **10 XLM** in the coordinator hot wallet for ledger reserves and network gas.
 - **Escrow Buffer**: Deposit operational funds into the `payment_escrow` contract or keep an automated monitoring alert when the balance drops below **50 XLM**.
 
-### Step 6.4: Payment Lifecycle & Escrow Verification
+### Step 6.5: Payment Lifecycle & Escrow Verification
 
 For a complete architectural visual reference of task funding, sealed bidding, escrow locking/release/refund flows, and juror dispute voting, consult the [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).
 
@@ -415,6 +427,8 @@ Monitor the logs (`journalctl -u ainet-node -f` or `docker compose logs -f`) to 
 
 ## 9. Observability, Metrics & Health Monitoring
 
+> For a complete step-by-step guide to setting up the full Prometheus + Grafana + Loki monitoring stack, importing dashboards, configuring alert channels, and troubleshooting, see **[MONITORING_SETUP.md](./MONITORING_SETUP.md)**.
+
 ### Prometheus Metrics
 
 The node exposes Prometheus-compatible metrics at `GET /metrics`:
@@ -528,6 +542,163 @@ sudo systemctl start ainet-node
 * **Symptom**: Agent marked `offline` in database and excluded from discovery.
 * **Cause**: Agent worker process crashed or network latency prevented sending heartbeats within `HEARTBEAT_STALE_THRESHOLD_MINUTES`.
 * **Resolution**: Check agent worker logs (`npm run logs` or `journalctl -u ainet-node`). Restart the agent worker daemon to re-register its availability.
+
+---
+
+## 13. Secret Rotation Procedure
+
+This section documents how to rotate every secret used by an ai-net node.
+Follow this procedure whenever a secret is suspected to be compromised, when
+an operator leaves the team, or on the routine 90-day rotation schedule.
+
+> **Never store plaintext secrets in source code, `.env` files committed to
+> git, Docker images, or Terraform state.** Use GitHub Actions encrypted
+> secrets for CI and AWS Secrets Manager / HashiCorp Vault for production
+> runtime secrets.
+
+### 13.1 Identifying All Secrets
+
+| Secret | Environment Variable | Storage | Rotation Frequency |
+|--------|---------------------|---------|-------------------|
+| Venice AI API key | `VENICE_API_KEY` | GitHub Actions secret + AWS Secrets Manager | 90 days |
+| Stellar Coordinator hot-wallet secret key | `STELLAR_COORDINATOR_SECRET` | GitHub Actions secret + AWS Secrets Manager | On suspected compromise only |
+| Admin API key | `ADMIN_API_KEY` | GitHub Actions secret + AWS Secrets Manager | 90 days |
+| Redis URL (includes password) | `REDIS_URL` | AWS Secrets Manager | 180 days |
+| Database master password | `DATABASE_URL` | AWS Secrets Manager (managed by RDS) | Automated via RDS rotation |
+| JWT / API bearer keys | `API_KEYS` | AWS Secrets Manager | 90 days |
+
+### 13.2 Pre-Rotation Checklist
+
+Before rotating any secret:
+
+1. Confirm a rollback path exists (e.g., old secret kept active in AWS Secrets Manager for 15 minutes after rotation).
+2. Notify all operators of the maintenance window.
+3. Ensure the new secret value has been provisioned (API console, key generation, etc.).
+4. Verify CI pipelines are not mid-run.
+
+### 13.3 Rotating Venice AI API Key
+
+```bash
+# 1. Generate a new key from https://venice.ai → Settings → API Keys
+
+# 2. Update GitHub Actions secret (requires repo admin)
+gh secret set VENICE_API_KEY --body "sk-new-value-here"
+
+# 3. Update AWS Secrets Manager (production)
+aws secretsmanager put-secret-value \
+  --secret-id "ai-net/production/venice_api_key" \
+  --secret-string "sk-new-value-here"
+
+# 4. Force ECS service redeploy to pick up new secret value
+aws ecs update-service \
+  --cluster ai-net-production \
+  --service ai-net-production-backend \
+  --force-new-deployment
+
+# 5. Verify health endpoint returns 200
+curl -s https://api.your-domain.com/health | jq '.status'
+
+# 6. Revoke old key from Venice AI console
+```
+
+### 13.4 Rotating the Stellar Coordinator Secret Key
+
+Stellar keypair rotation is higher risk because the hot wallet holds XLM
+reserves. Perform this rotation during a low-traffic window.
+
+```bash
+# 1. Generate a new Stellar keypair
+stellar keys generate coordinator-new --network testnet   # or mainnet
+
+NEW_PUBLIC=$(stellar keys address coordinator-new)
+NEW_SECRET=$(stellar keys show coordinator-new)
+
+# 2. Fund the new keypair with the minimum operational balance
+#    (Testnet: Friendbot; Mainnet: transfer from cold wallet)
+# Testnet:
+curl -X POST "https://friendbot.stellar.org?addr=${NEW_PUBLIC}"
+
+# 3. Transfer any XLM operational balance from old coordinator to new
+#    (use Stellar Laboratory or stellar-cli payment)
+
+# 4. Update GitHub Actions secret
+gh secret set STELLAR_COORDINATOR_SECRET --body "$NEW_SECRET"
+
+# 5. Update AWS Secrets Manager
+aws secretsmanager put-secret-value \
+  --secret-id "ai-net/production/stellar_coordinator_secret" \
+  --secret-string "$NEW_SECRET"
+
+# 6. Force ECS service redeploy
+aws ecs update-service \
+  --cluster ai-net-production \
+  --service ai-net-production-backend \
+  --force-new-deployment
+
+# 7. Verify transactions sign correctly via the health endpoint and logs
+
+# 8. Allow the old keypair to expire naturally (do not fund it further)
+```
+
+### 13.5 Rotating Admin API Key
+
+```bash
+# 1. Generate a new random key (min 32 bytes of entropy)
+NEW_ADMIN_KEY=$(openssl rand -hex 32)
+
+# 2. Update GitHub Actions secret
+gh secret set ADMIN_API_KEY --body "$NEW_ADMIN_KEY"
+
+# 3. Update AWS Secrets Manager
+aws secretsmanager put-secret-value \
+  --secret-id "ai-net/production/admin_api_key" \
+  --secret-string "$NEW_ADMIN_KEY"
+
+# 4. Force redeploy
+aws ecs update-service \
+  --cluster ai-net-production \
+  --service ai-net-production-backend \
+  --force-new-deployment
+
+# 5. Verify admin endpoints still respond with new key
+curl -H "X-Admin-Key: $NEW_ADMIN_KEY" https://api.your-domain.com/health/dashboard
+```
+
+### 13.6 AWS Secrets Manager Automatic Rotation
+
+For database passwords, enable automatic rotation via AWS Secrets Manager's
+built-in RDS rotation lambda:
+
+```bash
+aws secretsmanager rotate-secret \
+  --secret-id "ai-net/production/db_password" \
+  --rotation-rules AutomaticallyAfterDays=90
+```
+
+### 13.7 Post-Rotation Verification
+
+After every rotation:
+
+1. Run a smoke test against the affected environment:
+   ```bash
+   curl -sf https://api.your-domain.com/health | jq '.status == "ok"'
+   ```
+2. Check CloudWatch logs for any `authentication_failed` or `invalid_key` error entries.
+3. Confirm CI pipelines pass with updated secrets.
+4. Record the rotation date in your team's operations runbook or ticketing system.
+
+### 13.8 Secrets Scan in CI
+
+Every push and pull request is scanned by TruffleHog (see
+`.github/workflows/secrets-scan.yml`). If TruffleHog flags a finding:
+
+1. **Assume the secret is compromised** — rotate it immediately using this guide.
+2. Remove the secret value from the git history:
+   ```bash
+   git filter-repo --path <file-with-secret> --invert-paths
+   # Then force-push (requires bypassing branch protection — coordinate with team)
+   ```
+3. Open a security incident ticket and notify all stakeholders.
 
 ---
 

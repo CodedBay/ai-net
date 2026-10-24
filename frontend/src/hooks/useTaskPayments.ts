@@ -35,7 +35,7 @@ export const useTaskPayments = (_taskId: string) => {
             }
           ];
 
-        case 'payment_released':
+        case 'payment_released': {
           const txHash = (event.payload as any)?.txHash || 'mock-hash';
           // Check if there's already a locked payment for this nodeId to update it
           const existingIndex = prev.findIndex(p => 
@@ -66,6 +66,7 @@ export const useTaskPayments = (_taskId: string) => {
               txHash,
             }
           ];
+        }
 
         default:
           return prev;

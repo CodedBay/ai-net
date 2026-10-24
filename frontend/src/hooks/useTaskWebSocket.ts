@@ -38,6 +38,20 @@ function cursorStorageKey(taskId: string): string {
   return `ai-net:ws-cursor:${taskId}`;
 }
 
+/**
+ * Manages a WebSocket connection to the task event stream with automatic
+ * reconnection and cursor-based event resume.
+ *
+ * Opens a WebSocket to `<baseUrl>/tasks/<taskId>/stream`, responds to server
+ * heartbeats (ping/pong), persists the last-seen event sequence to
+ * `sessionStorage` so reconnects replay only missed events, and applies
+ * exponential-backoff with optional jitter between reconnect attempts.
+ *
+ * @param options - Connection configuration; see {@link UseTaskWebSocketOptions}.
+ * @returns An object containing the current connection `status`, the
+ *   `isConnected` boolean flag, and `reconnect`/`disconnect` control
+ *   functions.
+ */
 export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
   const {
     taskId,

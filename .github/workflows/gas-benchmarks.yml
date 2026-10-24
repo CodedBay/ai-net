@@ -1,0 +1,62 @@
+name: Gas Benchmarks
+
+on:
+  push:
+    paths:
+      - "smart-contracts/contracts/**/*.rs"
+      - "smart-contracts/contracts/**/Cargo.toml"
+  pull_request:
+    paths:
+      - "smart-contracts/contracts/**/*.rs"
+      - "smart-contracts/contracts/**/Cargo.toml"
+
+jobs:
+  benchmark:
+    name: Run gas-cost benchmarks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: smart-contracts
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32v1-none
+
+      - name: Cache Cargo registry and build artefacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            smart-contracts/target
+          key: ${{ runner.os }}-cargo-benchmarks-${{ hashFiles('smart-contracts/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-benchmarks-
+            ${{ runner.os }}-cargo-
+
+      - name: Run gas benchmarks
+        # --features benchmarks compiles the benchmark test module.
+        # -- benchmark filters to only tests whose names contain "benchmark".
+        # --nocapture prints the measured cpu_instruction_count for each benchmark.
+        # Any assertion failure (hard ceiling > 10M CU or regression > 20%) fails the job.
+        run: >
+          cargo test
+          --package agent_registry
+          --features benchmarks
+          --
+          benchmark
+          --nocapture
+
+      - name: Upload benchmark output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gas-benchmark-results
+          path: smart-contracts/target/debug/.cargo-lock
+          if-no-files-found: ignore

@@ -43,7 +43,7 @@ function buildApp(db: AgentDb, healthTimeoutMs = 500) {
   return app;
 }
 
-const VALID_KEY = "GTESTAGENTSTELLARKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const VALID_KEY = "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET /api/agents — list error branch

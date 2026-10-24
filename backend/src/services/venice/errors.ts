@@ -1,5 +1,9 @@
 export class CircuitOpenError extends Error {
-  constructor(message = 'Circuit breaker is OPEN — Venice requests are blocked') {
+  readonly code = 'llm_unavailable';
+  readonly statusCode = 503;
+  readonly retryAfter = 30;
+
+  constructor(message = 'Venice AI is temporarily unavailable. Please retry in 30 seconds.') {
     super(message);
     this.name = 'CircuitOpenError';
   }

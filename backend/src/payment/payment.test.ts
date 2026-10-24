@@ -4,6 +4,7 @@
  * The Stellar SDK is mocked at the module level (see __mocks__/@stellar).
  * taskStore is mocked so tests don't need a real SQLite database.
  */
+import { resetConfigForTests } from "../config";
 import { createPaymentReleaseFn } from "./index";
 
 // ── Mock taskStore ────────────────────────────────────────────────────────────
@@ -19,6 +20,7 @@ const VALID_SECRET = "SCZANGBA5UOQVWDPI6QISXZAAFNKGJE4RFV7YMD6RVNOQKZSLK4P3SA";
 beforeEach(() => {
   jest.clearAllMocks();
   delete process.env.STELLAR_COORDINATOR_SECRET;
+  resetConfigForTests();
 });
 
 describe("createPaymentReleaseFn — STELLAR_COORDINATOR_SECRET not set", () => {

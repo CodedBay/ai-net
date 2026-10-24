@@ -35,7 +35,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, l
   return (
     <motion.div
       className={styles.card}
-      whileHover={{ y: -3, boxShadow: '0 8px 24px rgba(15, 23, 42, 0.18)' }}
+      whileHover={{ y: -3, boxShadow: 'var(--shadow-md)' }}
       transition={{ type: 'spring', stiffness: 300, damping: 22 }}
     >
       <div className={styles.title}>{title}</div>
@@ -62,14 +62,14 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, l
           <AreaChart data={chartData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0.4} />
-                <stop offset="100%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0} />
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
               </linearGradient>
             </defs>
             <Area
               type="monotone"
               dataKey="y"
-              stroke="var(--color-accent, #8884d8)"
+              stroke="var(--accent)"
               fill={`url(#${gradientId})`}
               strokeWidth={1.5}
               dot={false}

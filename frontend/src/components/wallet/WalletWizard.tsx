@@ -10,7 +10,7 @@ import styles from './WalletWizard.module.css'
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
   const { balance, balances } = useWalletBalance(publicKey)
-  const { currentStep, nextStep, prevStep } = useOnboarding(4)
+  const { currentStep, nextStep, prevStep } = useOnboarding()
 
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
@@ -32,8 +32,15 @@ export const WalletWizard: React.FC = () => {
     completeWizard()
   }
 
+  // Keyboard navigation: Shift+Tab goes back a step from the first focusable
+  // element; plain Tab from the last focusable element advances (#101).
+  const handleWizardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); nextStep() }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); prevStep() }
+  }
+
   return (
-    <div className={styles.wizardWrapper}>
+    <div className={styles.wizardWrapper} onKeyDown={handleWizardKeyDown}>
       <div className={styles.wizardHeader}>
         <WizardProgress currentStep={currentStep} totalSteps={4} />
         <button onClick={completeWizard} className={styles.skipButton}>

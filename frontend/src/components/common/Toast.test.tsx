@@ -15,8 +15,10 @@ function TestComponent() {
       <button
         onClick={() =>
           showToast('Action required', 'error', {
-            label: 'Retry',
-            onClick: () => setRetryCount((c) => c + 1),
+            action: {
+              label: 'Retry',
+              onClick: () => setRetryCount((c) => c + 1),
+            },
           })
         }
       >

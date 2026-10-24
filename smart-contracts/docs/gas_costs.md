@@ -16,6 +16,8 @@ Agent Registry exposes these estimates on-chain through `estimate_gas`.
 | `GAS_CLEANUP_ERROR_MARGINAL` | 8,000 | Extra cost per additional cleanup item |
 | `GAS_SLASH_BOND` | 52,000 | Full cost of a single `slash_bond` |
 | `GAS_DEREGISTER_WITH_BOND` | 68,000 | Full cost of `deregister_agent` with bond return |
+| `GAS_LIST_AGENTS` | 65,000 | Base cost of `list_agents` (index read + overhead) |
+| `GAS_LIST_AGENTS_PER_RESULT` | 2,200 | Marginal cost per agent record loaded in `list_agents` |
 
 ## Formulae
 
@@ -28,6 +30,12 @@ estimate(resolve_errors, n) =
 
 estimate(cleanup_expired_errors, n) =
     GAS_CLEANUP_ERROR + (n - 1) * GAS_CLEANUP_ERROR_MARGINAL
+
+// list_agents: cost is O(page_size), NOT O(total_agents)
+// index-first approach reads capability → agent IDs from Temporary storage,
+// then loads only the page_size agent records from Persistent storage.
+estimate(list_agents, page_size) =
+    GAS_LIST_AGENTS + page_size * GAS_LIST_AGENTS_PER_RESULT
 ```
 
 All formulae return `0` when `n == 0`.
@@ -64,6 +72,26 @@ All formulae return `0` when `n == 0`.
 | 10 | 110,000 | 88,000 | 20.0% |
 | 20 | 210,000 | 168,000 | 20.0% |
 
+### `list_agents` (composite index — issue #256 + #339)
+
+The old approach (`get_agents` with capability filter in Rust) loaded all
+registered agents into memory and filtered linearly — O(total_agents).
+The new `list_agents` reads the per-capability Temporary index first and only
+loads up to `page_size` agent records from Persistent storage — O(page_size).
+
+| Registry size | Page size | Previous CU (linear) | New CU (composite index) | Reduction |
+|--------------:|----------:|---------------------:|-------------------------:|----------:|
+| 50 agents | 20 | ~300,000 | ~109,000 | 63.7% |
+| 100 agents | 20 | ~600,000 | ~109,000 | 81.8% |
+| 150 agents | 20 | ~900,000 | ~109,000 | 87.9% |
+| 1,000 agents | 20 | >6,000,000 (exceeds budget) | ~109,000 | >98.0% |
+
+Formula: `GAS_LIST_AGENTS + page_size × GAS_LIST_AGENTS_PER_RESULT`
+= `65,000 + 20 × 2,200` = **109,000 CU** regardless of registry size.
+
+The 1 M-CU Soroban budget is satisfied for all registry sizes at the default
+page size of 20.
+
 ## Average Reduction
 
 The CI benchmark guard compares the optimized estimates against the previous
@@ -76,8 +104,9 @@ baseline for:
 | `resolve_error(1)` | 50,000 | 42,000 | 16.0% |
 | `resolve_errors(10)` | 320,000 | 240,000 | 25.0% |
 | `cleanup_expired_errors(10)` | 110,000 | 88,000 | 20.0% |
+| `list_agents(100 agents, page=20)` | 600,000 | 109,000 | 81.8% |
 
-Average reduction: **20.3%**, exceeding the 15% acceptance threshold.
+Average reduction: **30.6%**, exceeding the 15% acceptance threshold.
 
 ## Storage Optimizations
 
@@ -91,12 +120,19 @@ Average reduction: **20.3%**, exceeding the 15% acceptance threshold.
    `has()` reads before every rent bump.
 5. Lookup/list paths extend TTL directly when a previous `get()` already proved
    the key exists.
+6. `list_agents` uses a per-capability **Temporary** storage index
+   (`TempCapabilityIndex`) to apply the capability filter before loading any
+   agent records from Persistent storage.  Only the requested page of records
+   is loaded — the scan is O(page_size), not O(total_agents).  The Temporary
+   index is maintained on every `register_agent`, `register_agents`, and
+   `deregister_agent` mutation, and transparently regenerated from the
+   canonical Persistent index if its TTL expires.
 
 ## Contract Snapshot
 
 | Contract | Hot path profiled | Current status |
 |----------|-------------------|----------------|
-| `agent_registry` | Registration, batch registration, error resolution, cleanup, bond updates | Optimized and CI-guarded |
+| `agent_registry` | Registration, batch registration, error resolution, cleanup, bond updates, **composite-index `list_agents`** | Optimized and CI-guarded |
 | `agent_bidding` | Auction create, bid submit/reveal, award/refund | Bounded maps/vectors; no unbounded storage iteration in this change |
 | `agent_marketplace` | Listing and purchase flows | Singleton config and per-listing records; no gas model exported yet |
 | `dispute_resolution` | Dispute create/vote/resolve | Bounded case records; no hot-path regression in this change |
@@ -104,6 +140,40 @@ Average reduction: **20.3%**, exceeding the 15% acceptance threshold.
 | `error-resolver` | Error count record/clear/query | Minimal per-agent counters; no extra reads introduced |
 | `task_store` | Task create/update/query | Per-task records; no unbounded collection mutation in this change |
 | `upgrade-manager` | Migration planning/execution | Existing estimator retained; no data migration in this change |
+| `payment_escrow` | Escrow create/release/dispute/expire | Per-escrow temporary records; bounded single-record operations |
 
 The unit tests in `contracts/agent_registry/src/test.rs` assert the benchmark
 tables and the >=15% average reduction guard.
+
+## On-chain Reputation (issue #191)
+
+New operations added to `agent_registry`:
+
+| Operation | Estimated CU | Notes |
+|-----------|-------------:|-------|
+| `update_reputation` (first call) | ~48,000 | Persistent write + TTL extend + event emit |
+| `update_reputation` (subsequent) | ~52,000 | Read + write + TTL extend + event emit |
+| `get_reputation` (cold) | ~18,000 | Persistent read + TTL extend |
+| `get_reputation` (warm) | ~12,000 | Persistent read (key in footprint) |
+| `set_task_store` | ~22,000 | Instance write + audit record |
+
+Storage overhead per agent: one `ReputationScore` record in Persistent storage
+(~80 bytes: two `u32`, one `u32` score, one `i128` payout). TTL extended to
+`TTL_EXTEND_TO = 241,920` ledgers (~14 days) on every update and read.
+
+## Payment Escrow (issue #192)
+
+New contract `payment_escrow`:
+
+| Operation | Estimated CU | Notes |
+|-----------|-------------:|-------|
+| `create_escrow` | ~55,000 | Temporary write + TTL set + event emit |
+| `release_escrow` | ~42,000 | Temporary read + write + event emit |
+| `dispute_escrow` | ~44,000 | Temporary read + write + event emit |
+| `expire_escrow` | ~38,000 | Temporary read + write + event emit |
+| `get_escrow` | ~14,000 | Temporary read |
+
+Storage: one `EscrowRecord` per task in Temporary storage. TTL set to
+`timeout_ledger` on creation; Soroban auto-expires the entry if neither
+release nor dispute is called in time. Dispute hold window: 48 ledgers (~4 min
+at 5 s/ledger).

@@ -35,9 +35,9 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
     display: 'inline-flex',
     alignItems: 'center',
     gap: '6px',
-    background: copied ? 'var(--success, #10b981)' : 'rgba(255, 255, 255, 0.08)',
-    border: '1px solid rgba(255, 255, 255, 0.15)',
-    color: '#ffffff',
+    background: copied ? 'var(--status-success)' : 'var(--surface-hover)',
+    border: '1px solid var(--border-muted)',
+    color: 'var(--text-primary)',
     padding: '5px 10px',
     borderRadius: '6px',
     cursor: 'pointer',
@@ -58,7 +58,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       style={buttonStyle}
       title="Copy to clipboard"
     >
-      {copied ? <Check size={iconSize} color="#ffffff" /> : <Copy size={iconSize} color="#e2e8f0" />}
+      {copied ? <Check size={iconSize} /> : <Copy size={iconSize} />}
       <span>{copied ? copiedLabel : label}</span>
     </button>
   );

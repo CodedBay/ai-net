@@ -27,9 +27,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   const toggle = () => setIsOpen((prev) => !prev);
 
   const containerStyle: React.CSSProperties = {
-    border: '1px solid rgba(255, 255, 255, 0.08)',
+    border: '1px solid var(--border-muted)',
     borderRadius: '8px',
-    backgroundColor: 'rgba(17, 21, 29, 0.4)',
+    backgroundColor: 'var(--surface-glass)',
     marginBottom: '16px',
     overflow: 'hidden',
     ...style,
@@ -40,7 +40,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '10px 14px',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    backgroundColor: 'var(--surface-hover-subtle)',
     cursor: 'pointer',
     userSelect: 'none',
     transition: 'background-color 0.2s ease',
@@ -56,11 +56,11 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isOpen ? (
-            <ChevronDown size={16} color="var(--accent-cyan, #38bdf8)" />
+            <ChevronDown size={16} color="var(--accent-cyan)" />
           ) : (
-            <ChevronRight size={16} color="var(--text-secondary, #8a93a3)" />
+            <ChevronRight size={16} color="var(--text-secondary)" />
           )}
-          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary, #f5f7fa)' }}>
+          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
             {title}
           </span>
         </div>
@@ -70,9 +70,9 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
             <span
               style={{
                 fontSize: '0.75rem',
-                color: 'var(--text-secondary, #8a93a3)',
+                color: 'var(--text-secondary)',
                 fontFamily: 'monospace',
-                background: 'rgba(255, 255, 255, 0.05)',
+                background: 'var(--surface-hover)',
                 padding: '2px 8px',
                 borderRadius: '4px',
               }}
@@ -80,7 +80,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
               {contentLength.toLocaleString()} chars
             </span>
           )}
-          <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan, #38bdf8)', fontWeight: 500 }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 500 }}>
             {isOpen ? 'Collapse' : 'Expand'}
           </span>
         </div>

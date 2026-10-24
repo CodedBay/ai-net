@@ -9,7 +9,9 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
-import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
+import { ValidationError, NotFoundError, AppError, RateLimitError, ForbiddenError, ConflictError } from "../../errors";
+import { idempotencyMiddleware } from "../middleware/idempotency";
+import { getConfig } from "../../config";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 
@@ -62,6 +64,14 @@ export function createTasksRouter(
    *     tags: [Tasks]
    *     security:
    *       - WalletAuth: []
+  *     parameters:
+  *       - in: header
+  *         name: Idempotency-Key
+  *         required: false
+  *         schema:
+  *           type: string
+  *           format: uuid
+  *         description: UUID v4 key scoped to the wallet. Repeated requests replay the original response for 24 hours.
    *     requestBody:
    *       required: true
    *       content:

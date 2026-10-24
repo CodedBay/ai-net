@@ -3,8 +3,15 @@ import { createRateLimiter } from '../src/api/middleware/rateLimit';
 
 // ── rateLimit ─────────────────────────────────────────────────────────────────
 
+// Restored after tests that pin their own value (tests/envSetup.ts raises the
+// global default for the rest of the suite).
+const RAISED_RATE_LIMIT = process.env.RATE_LIMIT_MAX_REQUESTS;
+
 function freshRateLimit() {
   jest.resetModules();
+  // This suite asserts the historical default of 20/min; pin it explicitly so
+  // the raised test-env ceiling (envSetup.ts) does not leak into these cases.
+  process.env.RATE_LIMIT_MAX_REQUESTS = '20';
   return require('../src/api/middleware/rateLimit').rateLimitMiddleware as typeof import('../src/api/middleware/rateLimit').rateLimitMiddleware;
 }
 
@@ -189,6 +196,7 @@ function makeAuthReq(authHeader?: string): Request {
 
 afterEach(() => {
   delete process.env.API_KEYS;
+  if (RAISED_RATE_LIMIT !== undefined) process.env.RATE_LIMIT_MAX_REQUESTS = RAISED_RATE_LIMIT;
   jest.resetModules();
 });
 

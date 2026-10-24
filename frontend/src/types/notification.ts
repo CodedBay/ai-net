@@ -2,6 +2,8 @@ export type NotificationType =
   | 'task_completed'
   | 'task_failed'
   | 'payment_received'
+  | 'payment_failed'
+  | 'payment_locked'
   | 'agent_registered'
   | 'task'
   | 'payment'
@@ -18,6 +20,7 @@ export interface AppNotification {
   read: boolean;
   link?: string;
   metadata?: Record<string, unknown>;
+  critical?: boolean;
 }
 
 export type NewNotificationInput = {
@@ -30,6 +33,7 @@ export type NewNotificationInput = {
   read?: boolean;
   link?: string;
   metadata?: Record<string, unknown>;
+  critical?: boolean;
 };
 
 export interface NotificationContextValue {

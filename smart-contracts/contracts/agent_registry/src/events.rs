@@ -548,3 +548,25 @@ pub struct AnomalyDetectedEvent {
     /// stroops for a high-value one, and zero for a first-seen caller.
     pub observed: i128,
 }
+
+// ─── Reputation events (issue #191) ──────────────────────────────────────────
+
+/// Data payload for `(registry, rep_upd)`.
+///
+/// Published every time an agent's reputation score is updated via
+/// `update_reputation`. Indexers can stream this event to power real-time
+/// leaderboard updates and agent quality dashboards.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReputationUpdatedEvent {
+    /// Agent whose reputation changed.
+    pub agent_id: Address,
+    /// Score before this update.
+    pub old_score: u32,
+    /// Score after this update.
+    pub new_score: u32,
+    /// Cumulative successful task count after this update.
+    pub tasks_completed: u32,
+    /// Cumulative failed task count after this update.
+    pub tasks_failed: u32,
+}

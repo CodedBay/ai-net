@@ -136,3 +136,74 @@ npm run build
 
 Lint catches naming violations (unused imports, type issues). Build verifies
 the full bundle compiles without errors.
+
+---
+
+## Design Token System
+
+All visual constants are defined as CSS custom properties in
+`frontend/src/styles/tokens.css` and mirrored as TypeScript constants in
+`frontend/src/styles/tokens.ts`. **Never hard-code colors, spacing, radii,
+font sizes, or shadows** — always use a token.
+
+### Token categories
+
+| Category | CSS prefix | TS export prefix | Example |
+|----------|-----------|-----------------|---------|
+| Color — primary/secondary | `--accent`, `--surface-*` | `COLOR_*` | `var(--accent)` / `COLOR_PRIMARY` |
+| Color — text | `--text-*` | `COLOR_TEXT_*` | `var(--text-primary)` |
+| Color — border | `--border-*` | `COLOR_BORDER` | `var(--border-primary)` |
+| Color — status | `--status-success/warning/danger/info` | `COLOR_STATUS_*` | `var(--status-success)` |
+| Typography — font family | `--font-sans`, `--font-mono` | `FONT_SANS`, `FONT_MONO` | `var(--font-sans)` |
+| Typography — font size | `--text-xs` … `--text-4xl` | `TEXT_XS` … `TEXT_4XL` | `var(--text-sm)` |
+| Typography — font weight | `--font-weight-normal` … `--font-weight-bold` | `FONT_WEIGHT.*` | `FONT_WEIGHT.semibold` |
+| Typography — line height | `--leading-tight` … `--leading-loose` | `LEADING_*` | `var(--leading-normal)` |
+| Spacing (4 px grid) | `--space-1` … `--space-24` | `SPACE_1` … `SPACE_24` | `var(--space-4)` (= 16 px) |
+| Border radius | `--radius-sm` … `--radius-full` | `RADIUS_*` | `var(--radius-md)` |
+| Shadow | `--shadow-sm` … `--shadow-xl` | `SHADOW_*` | `var(--shadow-md)` |
+| Breakpoints | `--breakpoint-sm` … `--breakpoint-2xl` | `BREAKPOINTS.*` | `BREAKPOINTS.lg` (= 1024) |
+
+### Using tokens in CSS
+
+```css
+/* ✅ correct */
+.card {
+  background: var(--surface-raised);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+/* ❌ never hard-code */
+.card {
+  background: #1a1f2e;
+  padding: 16px;
+  border-radius: 8px;
+}
+```
+
+### Using tokens in TypeScript / JS
+
+```ts
+import { COLOR_STATUS_SUCCESS, SHADOW_MD, BREAKPOINTS, TEXT_SIZE_PX } from '../styles/tokens';
+
+// recharts, canvas, jsPDF — places where CSS vars don't work
+<Line stroke={COLOR_STATUS_SUCCESS} />
+
+// media queries in JS
+const isDesktop = window.matchMedia(`(min-width: ${BREAKPOINTS.lg}px)`).matches;
+
+// raw pixel sizes for PDF generation
+doc.setFontSize(TEXT_SIZE_PX.sm);  // 14
+```
+
+### Dark / light mode
+
+Tokens are defined on `:root, .theme-dark, [data-theme="dark"]` for the dark
+default. Light overrides live in `.theme-light, [data-theme="light"]`.
+The `ThemeContext` applies the appropriate class to `<html>`.
+
+Both the class-based (`.theme-*`) and attribute-based (`[data-theme="*"]`)
+selectors are supported so third-party tools that set `data-theme` work
+automatically.

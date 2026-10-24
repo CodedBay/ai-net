@@ -9,36 +9,16 @@
 
 :root {
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  --bg-primary: #0A0E14;
-  --bg-surface: #11151D;
-  --bg-surface-alt: #161B24;
-  --bg-secondary: #1A1F2E;
-  --border-color: #2A3040;
-  --border-subtle: #1F2630;
-  --text-primary: #F5F7FA;
-  /* WCAG AA on --bg-primary/#0A0E14 and --bg-surface/#11151D (>= 7:1). The
-     previous #8A93A3 fell below 4.5:1 on surface backgrounds. */
-  --text-secondary: #A5AEBD;
-  --accent-cyan: #38BDF8;
-  --accent-purple: #8B5CF6;
-  --accent-green: #34D399;
-  --gradient-primary: linear-gradient(90deg, #38BDF8 0%, #8B5CF6 100%);
-  --panel-bg: var(--bg-surface);
-  --panel-border: var(--border-subtle);
-  --primary: var(--accent-purple);
-  --primary-hover: #7c3aed;
-  --primary-active: #6d28d9;
-  --success: var(--accent-green);
-  --danger: #ef4444;
-  --accent: var(--accent-cyan);
-  --skeleton-base: #1a1f2e;
-  --skeleton-shine: #2a3040;
+  --accent-cyan: var(--accent-info);
+  --accent-purple: var(--accent);
+  --accent-green: var(--status-success);
+  --primary-active: var(--accent-hover);
   /* Shared press/elevation tokens (issue #380). */
   --press-scale: 0.97;
   --press-brightness: 0.92;
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --elevation-1: var(--shadow-sm);
+  --elevation-2: var(--shadow-md);
+  --elevation-3: var(--shadow-lg);
 }
 
 * {
@@ -92,10 +72,9 @@ html, body {
 }
 
 .chip {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  /* #C7D2FE meets AA on the chip's indigo-tinted dark background. */
-  color: #C7D2FE;
+  background: var(--accent-surface);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
   padding: 6px 12px;
   border-radius: var(--radius-pill);
   font-size: 0.85rem;
@@ -160,6 +139,30 @@ input:focus, textarea:focus {
   font-weight: 500;
 }
 
+.route-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+}
+
+.route-loader-content {
+  width: min(320px, 80vw);
+}
+
+.route-loader-line {
+  height: 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--skeleton-base);
+}
+
+.route-loader-line-title {
+  height: 1rem;
+  margin-bottom: 0.75rem;
+  background: var(--skeleton-shine);
+}
+
 .dag-container {
   display: flex;
   gap: 24px;
@@ -187,26 +190,26 @@ input:focus, textarea:focus {
 .dag-node.completed {
   background: var(--status-success-surface);
   border-color: var(--success);
-  color: #A7F3D0;
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+  color: var(--status-success-text);
+  box-shadow: var(--glow-success);
 }
 
 .dag-node.pending {
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #FCD34D;
+  background: var(--status-warning-surface-muted);
+  border-color: var(--status-warning-border-strong);
+  color: var(--status-warning-text);
 }
 
 .dag-node.failed {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #FCA5A5;
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-border-strong);
+  color: var(--status-danger-text);
 }
 
 .dag-node.running {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.6);
-  color: #C7D2FE;
+  background: var(--accent-surface-strong);
+  border-color: var(--accent-border-strong);
+  color: var(--accent-text);
 }
 
 .dag-arrow {
@@ -327,4 +330,3 @@ td,
   --primary-active: #5b21b6;
   --accent: var(--accent-cyan);
 }
-

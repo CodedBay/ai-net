@@ -93,7 +93,7 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).get("/api/agents/missing");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
+    expect(response.body).toEqual({ error: { code: "AGENT_NOT_FOUND", message: "Agent 'missing' not found" } });
   });
 
   it("returns healthy status and latency for a reachable agent endpoint", async () => {
@@ -140,7 +140,7 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).get("/api/agents/missing/health");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
+    expect(response.body).toEqual({ error: { code: "AGENT_NOT_FOUND", message: "Agent 'missing' not found" } });
   });
 
   it("returns 200 and updates lastSeenAt on heartbeat", async () => {
@@ -162,7 +162,7 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).post("/api/agents/missing/heartbeat");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
+    expect(response.body).toEqual({ error: { code: "AGENT_NOT_FOUND", message: "Agent 'missing' not found" } });
   });
 });
 

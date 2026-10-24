@@ -1,0 +1,462 @@
+/* ─── Container ──────────────────────────────────────────────────── */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--panel-bg, #16181c);
+  border: 1px solid var(--panel-border, #2a2d36);
+  border-radius: 12px;
+  max-width: 640px;
+  width: 100%;
+  position: relative;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary, #e8eaf0);
+  margin: 0;
+}
+
+.taskId {
+  font-size: 0.72rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary, #8b8fa8);
+  background: var(--surface-muted, #1e2028);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ─── WebSocket indicator ────────────────────────────────────────── */
+
+.wsIndicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--status-success, #34d399);
+  letter-spacing: 0.03em;
+}
+
+.wsIndicatorOff {
+  color: var(--text-muted, #585c72);
+}
+
+/* ─── Status badges ──────────────────────────────────────────────── */
+
+.statusBadge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge_queued  { background: var(--status-info-surface, #1e2a3a); color: var(--status-info, #60a5fa); }
+.badge_running { background: var(--status-warn-surface, #2a2010); color: var(--status-warn, #fbbf24); }
+.badge_completed { background: var(--status-success-surface, #0f261c); color: var(--status-success, #34d399); }
+.badge_failed  { background: var(--status-danger-surface, #2a1014); color: var(--status-danger, #f87171); }
+
+/* ─── Progress bar ───────────────────────────────────────────────── */
+
+.progressBar {
+  height: 6px;
+  background: var(--surface-muted, #1e2028);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: var(--primary, #6366f1);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.progressFillFailed {
+  background: var(--status-danger, #f87171);
+}
+
+.progressLabel {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #8b8fa8);
+  margin: -8px 0 0;
+}
+
+/* ─── Step list ──────────────────────────────────────────────────── */
+
+.stepList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 0 12px;
+}
+
+.step_running .stepLabel { color: var(--status-warn, #fbbf24); }
+.step_completed .stepLabel { color: var(--text-primary, #e8eaf0); }
+.step_failed .stepLabel { color: var(--status-danger, #f87171); }
+.step_skipped .stepLabel { color: var(--text-muted, #585c72); }
+.step_pending .stepLabel { color: var(--text-secondary, #8b8fa8); }
+
+/* ─── Connector (icon + vertical line) ───────────────────────────── */
+
+.connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.iconWrap {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.line {
+  width: 2px;
+  flex: 1;
+  min-height: 16px;
+  background: var(--panel-border, #2a2d36);
+  margin: 2px 0;
+}
+
+/* ─── Status icons ───────────────────────────────────────────────── */
+
+.iconCompleted { color: var(--status-success, #34d399); }
+.iconFailed    { color: var(--status-danger, #f87171); }
+.iconRunning   { color: var(--status-warn, #fbbf24); }
+.iconPending   { color: var(--text-muted, #585c72); }
+.iconSkipped   { color: var(--text-muted, #585c72); }
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── Step content ───────────────────────────────────────────────── */
+
+.stepContent {
+  padding: 6px 0 16px;
+  min-height: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+
+.stepBadge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge_running   { background: var(--status-warn-surface, #2a2010);    color: var(--status-warn, #fbbf24); }
+.badge_completed { background: var(--status-success-surface, #0f261c); color: var(--status-success, #34d399); }
+.badge_failed    { background: var(--status-danger-surface, #2a1014);  color: var(--status-danger, #f87171); }
+.badge_pending   { background: var(--surface-muted, #1e2028);          color: var(--text-muted, #585c72); }
+.badge_skipped   { background: var(--surface-muted, #1e2028);          color: var(--text-muted, #585c72); }
+
+.stepMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.metaChip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #8b8fa8);
+  background: var(--surface-muted, #1e2028);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.metaError {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--status-danger, #f87171);
+}
+
+/* ─── Result panel ───────────────────────────────────────────────── */
+
+.resultPanel {
+  background: var(--status-success-surface, #0f261c);
+  border: 1px solid var(--status-success-border, #1a4a30);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resultHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--status-success, #34d399);
+}
+
+.costSummary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #8b8fa8);
+}
+
+.outputPanel {
+  margin-top: 4px;
+}
+
+.outputTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary, #8b8fa8);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+}
+
+.outputContent {
+  font-size: 0.78rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary, #e8eaf0);
+  background: var(--surface-muted, #1e2028);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+/* ─── Failed panel ───────────────────────────────────────────────── */
+
+.failedPanel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--status-danger-surface, #2a1014);
+  border: 1px solid var(--status-danger-border, #4a1a20);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 0.875rem;
+  color: var(--status-danger, #f87171);
+}
+
+/* ─── Actions ────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────── */
+
+.btnDanger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--status-danger-surface, #2a1014);
+  border: 1px solid var(--status-danger, #f87171);
+  border-radius: 6px;
+  color: var(--status-danger, #f87171);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: #3d1118;
+  transform: translateY(-1px);
+}
+
+.btnDanger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--surface-muted, #1e2028);
+  border: 1px solid var(--panel-border, #2a2d36);
+  border-radius: 6px;
+  color: var(--text-primary, #e8eaf0);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnSecondary:hover:not(:disabled) {
+  background: #252830;
+}
+
+.btnSecondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── Modal ──────────────────────────────────────────────────────── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--panel-bg, #16181c);
+  border: 1px solid var(--panel-border, #2a2d36);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: slideUp 0.15s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modalTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary, #e8eaf0);
+  margin: 0;
+}
+
+.modalBody {
+  font-size: 0.875rem;
+  color: var(--text-secondary, #8b8fa8);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ─── Error state ────────────────────────────────────────────────── */
+
+.errorState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--status-danger, #f87171);
+  text-align: center;
+}
+
+/* ─── Skeleton ───────────────────────────────────────────────────── */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-muted, #1e2028) 25%,
+    var(--panel-border, #2a2d36) 50%,
+    var(--surface-muted, #1e2028) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeletonTitle {
+  height: 18px;
+  width: 140px;
+}
+
+.skeletonBadge {
+  height: 20px;
+  width: 60px;
+  border-radius: 999px;
+}
+
+.skeletonLine {
+  height: 14px;
+  width: 80%;
+}

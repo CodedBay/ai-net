@@ -12,6 +12,7 @@ declare module "@stellar/stellar-sdk" {
     constructor(serverURL: string);
     loadAccount(publicKey: string): Promise<AccountResponse>;
     submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+    getTransaction(hash: string): { call(): Promise<TransactionResult> };
     claimableBalances(): ClaimableBalanceCallBuilder;
   }
 
@@ -20,6 +21,7 @@ declare module "@stellar/stellar-sdk" {
       constructor(serverURL: string);
       loadAccount(publicKey: string): Promise<AccountResponse>;
       submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+      getTransaction(hash: string): { call(): Promise<TransactionResult> };
       claimableBalances(): ClaimableBalanceCallBuilder;
     }
   }
@@ -52,6 +54,14 @@ declare module "@stellar/stellar-sdk" {
   export interface AccountResponse {
     id: string;
     sequence: string;
+    balances?: Array<{ asset_type?: string; balance?: string }>;
+  }
+
+  export interface TransactionResult {
+    hash: string;
+    successful: boolean;
+    ledger?: number;
+    [key: string]: unknown;
   }
 
   export interface HorizonResponse {
@@ -60,8 +70,10 @@ declare module "@stellar/stellar-sdk" {
   }
 
   export class TransactionBuilder {
+    static fromXDR(xdr: string, networkPassphrase: string): Transaction;
     constructor(account: AccountResponse, options: TransactionBuilderOptions);
     addOperation(op: Operation): this;
+    addMemo(memo: Memo): this;
     setTimeout(timeout: number): this;
     build(): Transaction;
   }
@@ -74,11 +86,13 @@ declare module "@stellar/stellar-sdk" {
   export interface Transaction {
     sign(keypair: Keypair): void;
     getClaimableBalanceId(opIndex: number): string;
+    toXDR(): string;
   }
 
   export type Operation = Record<string, unknown>;
 
   export const Operation: {
+    payment(opts: { destination: string; asset: Asset; amount: string }): Operation;
     createClaimableBalance(opts: {
       asset: Asset;
       amount: string;
@@ -89,6 +103,10 @@ declare module "@stellar/stellar-sdk" {
 
   export class Asset {
     static native(): Asset;
+  }
+
+  export class Memo {
+    static text(value: string): Memo;
   }
 
   export class Claimant {

@@ -84,11 +84,12 @@ describe("Heartbeat Monitoring and Dead-Agent Cleanup", () => {
       // Set lastSeenAt to 10 minutes ago
       rawDb.prepare(`
         UPDATE agents
-        SET lastSeenAt = datetime('now', '-10 minutes')
+        SET lastSeenAt = datetime('now', '-10 minutes'),
+            last_seen_at = unixepoch() - 600
         WHERE id = 'agent-1'
       `).run();
 
-      const marked = db.markStaleAgents(5); // 5 minute threshold
+      const marked = db.markStaleAgents(300); // 5 minute threshold
 
       expect(marked).toBe(1);
       const agent = db.findById("agent-1");
@@ -130,27 +131,30 @@ describe("Heartbeat Monitoring and Dead-Agent Cleanup", () => {
   });
 
   describe("Heartbeat Cleanup Background Service", () => {
+    // FLAKY: timing-sensitive — intervalMs=100 relies on real clock ticks which
+    // can be missed under heavy CI load. The test compensates by calling
+    // markStaleAgents manually, but service.start() itself races the interval.
     it("runs cleanup on interval and logs stats", () => {
       const { db, rawDb } = createTestApp([testAgent]);
 
       rawDb.prepare(`
         UPDATE agents
-        SET lastSeenAt = datetime('now', '-10 minutes')
+        SET lastSeenAt = datetime('now', '-10 minutes'),
+            last_seen_at = unixepoch() - 600
         WHERE id = 'agent-1'
       `).run();
 
       const service = createHeartbeatService({
         db,
         intervalMs: 100,
-        staleThresholdMinutes: 5,
-        offlineThresholdHours: 24,
+        staleThresholdSeconds: 300,
       });
 
       service.start();
       service.stop();
 
       // Explicitly test service manual trigger / interval logic
-      const marked = db.markStaleAgents(5);
+      const marked = db.markStaleAgents(300);
       expect(marked).toBe(1);
       expect(db.findById("agent-1")?.status).toBe("offline");
     });

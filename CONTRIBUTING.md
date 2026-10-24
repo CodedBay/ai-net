@@ -26,6 +26,28 @@ This handbook establishes our **Software Development Life Cycle (SDLC)**, branch
 
 ---
 
+## 1.1 Local Git Hooks
+
+After cloning the repository and installing dependencies, enable the project hooks once:
+
+```bash
+npm install
+```
+
+The root `package.json` uses Husky's `prepare` script, so the hooks are installed automatically during `npm install`. The hooks enforce:
+
+- `pre-commit`: `lint-staged` runs ESLint and Prettier only on staged files
+- `commit-msg`: `commitlint` validates Conventional Commits
+- `pre-push`: `npm run typecheck` before pushing
+
+If the hooks are not installed yet, run:
+
+```bash
+npx husky install
+```
+
+---
+
 ## 2. Branch Naming Conventions
 
 All branches must follow standardized prefixes with an optional issue number:
@@ -182,3 +204,9 @@ Before marking a PR as ready for review:
 ## 7. Agent & Contributor Guidelines
 
 For AI coding agents and automated contributors, refer to [AGENTS.md](AGENTS.md) for strict architectural rules, toolchain conventions, and repository standards.
+
+---
+
+## 8. New Contributor Onboarding
+
+First time contributing to ai-net? The **[Contributor Onboarding Checklist](docs/CONTRIBUTOR_CHECKLIST.md)** walks you from a fresh clone to a merged PR in checklist format, with time estimates, branch naming examples, commit message templates, and a table of common mistakes that block merge.

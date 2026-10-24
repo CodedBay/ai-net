@@ -12,12 +12,20 @@ pub enum Error {
     Unauthorized = 2,
     /// Contract has already been initialized.
     AlreadyInitialized = 3,
-    /// The requested price feed asset pair was not found.
+    /// No price feed exists for the requested asset pair.
     FeedNotFound = 4,
-    /// The price feed data is stale (older than the configured max age).
+    /// The stored price is older than the configured `max_price_age`.
     PriceStale = 5,
-    /// The reported price is zero or negative.
+    /// The submitted price is zero or negative.
     InvalidPrice = 6,
     /// The submitted timestamp is in the future or otherwise invalid.
     InvalidTimestamp = 7,
+    /// Caller is not a registered price feeder.
+    FeederNotRegistered = 8,
+    /// Maximum number of price feeders (5) reached.
+    MaxFeedersExceeded = 9,
+    /// Submitted price deviates more than 10% from current median.
+    PriceDeviationTooHigh = 10,
+    /// Feeder address is already registered.
+    FeederAlreadyRegistered = 11,
 }

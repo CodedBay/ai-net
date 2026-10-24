@@ -90,6 +90,7 @@ export interface QualityScoreRecord {
   relevance: number;
   format: number;
   needsReview: boolean;
+  responseTimeMs?: number;
   timestamp: string;
 }
 

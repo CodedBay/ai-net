@@ -195,16 +195,16 @@ describe('Trace propagation acceptance criteria', () => {
       expect(res.status).toBe(404);
     });
 
-    it('rejects non-admin access with 401', async () => {
+    it('rejects non-admin access with 403', async () => {
       const res = await request(app).get('/api/admin/traces/some-id');
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(403);
     });
 
     it('rejects a request with a wrong admin key', async () => {
       const res = await request(app)
         .get('/api/admin/traces/some-id')
         .set('X-Admin-API-Key', 'wrong-key');
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(403);
     });
   });
 

@@ -4,6 +4,16 @@
   border-radius: var(--radius-xl);
   padding: 24px;
   margin-bottom: 24px;
+  /* Tablet: allow internal horizontal scroll instead of page-level overflow */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Tablet: adjust padding for 768px–1023px viewports */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .container {
+    padding: 16px;
+  }
 }
 
 .heading {
@@ -140,16 +150,16 @@
 
 .pageButton:hover:not(:disabled) {
   background: var(--bg-surface-alt);
-  border-color: rgba(99, 102, 241, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .pageButton:active:not(:disabled) {
-  background: rgba(99, 102, 241, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   transform: scale(0.94);
 }
 
 .pageButton:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
 }
 
@@ -300,7 +310,7 @@
 }
 
 .txLink:focus-visible {
-  outline: 2px solid var(--accent, #38bdf8);
+  outline: 2px solid var(--accent, var(--info-border));
   outline-offset: 2px;
   border-radius: 4px;
 }

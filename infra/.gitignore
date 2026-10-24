@@ -1,0 +1,15 @@
+# Terraform local state and provider cache — never commit these
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+
+# Variable files that may contain real values
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

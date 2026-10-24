@@ -1,4 +1,5 @@
 import request from "supertest";
+import { StrKey } from "@stellar/stellar-base";
 import Database from "better-sqlite3";
 import express from "express";
 import { createAuthDb, AuthDb } from "../src/db/auth";
@@ -6,8 +7,12 @@ import { TokenService } from "../src/services/auth/tokenService";
 import { RevocationRegistry } from "../src/services/auth/revocationRegistry";
 import { AuthService } from "../src/services/auth/authService";
 import { createAuthRouter } from "../src/api/routes/auth";
+import * as authServiceModule from "../src/services/auth/authService";
+import { resetConfigForTests } from "../src/config";
 import { authMiddleware, sessionAuthMiddleware } from "../src/api/middleware/auth";
 import { errorHandler } from "../src/api/middleware/errorHandler";
+
+const testWallet = (seed: number) => StrKey.encodeEd25519PublicKey(Buffer.alloc(32, seed));
 
 describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", () => {
   let db: Database.Database;
@@ -80,6 +85,11 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
       revocationRegistry,
     });
 
+    // authMiddleware consults the process-wide AuthService singleton; point it
+    // at this test's in-memory instance so tokens verify against the test DB
+    // and JWT secret instead of the production config.
+    jest.spyOn(authServiceModule, "getAuthService").mockReturnValue(authService);
+
     app = express();
     app.use(express.json());
     app.use("/api/auth", createAuthRouter(authService));
@@ -93,6 +103,9 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
+    delete process.env.API_KEYS;
+    resetConfigForTests();
     db.close();
   });
 
@@ -346,19 +359,31 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
   });
 
   describe("API Endpoints (/api/auth)", () => {
+    it("returns field-level errors for an invalid Stellar public key", async () => {
+      const res = await request(app)
+        .post("/api/auth/token")
+        .send({ walletPublicKey: "G_NOT_A_STELLAR_KEY", deviceId: "desktop" })
+        .expect(400);
+
+      expect(res.body.fieldErrors).toContainEqual(
+        expect.objectContaining({ field: "body.walletPublicKey" }),
+      );
+    });
+
     it("POST /api/auth/token creates tokens and protected route succeeds", async () => {
       const res = await request(app)
         .post("/api/auth/token")
         .send({
-          walletPublicKey: "G_API_TEST_WALLET",
+          walletPublicKey: testWallet(1),
           deviceId: "desktop_app",
-          deviceName: "Desktop Client",
+          deviceName: "<b>Desktop Client</b>",
         })
         .expect(200);
 
       expect(res.body.accessToken).toBeDefined();
       expect(res.body.refreshToken).toBeDefined();
       expect(res.body.session.deviceId).toBe("desktop_app");
+      expect(res.body.session.deviceName).toBe("Desktop Client");
 
       // Use the access token on a protected route
       const protectedRes = await request(app)
@@ -366,14 +391,14 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
         .set("Authorization", `Bearer ${res.body.accessToken}`)
         .expect(200);
 
-      expect(protectedRes.body.user.sub).toBe("G_API_TEST_WALLET");
+      expect(protectedRes.body.user.sub).toBe(testWallet(1));
     });
 
     it("POST /api/auth/refresh rotates token via API", async () => {
       const loginRes = await request(app)
         .post("/api/auth/token")
         .send({
-          walletPublicKey: "G_API_ROTATION",
+          walletPublicKey: testWallet(2),
           deviceId: "tablet",
         })
         .expect(200);
@@ -393,7 +418,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
       const loginRes = await request(app)
         .post("/api/auth/token")
         .send({
-          walletPublicKey: "G_API_REUSE_TEST",
+          walletPublicKey: testWallet(3),
           deviceId: "phone",
         })
         .expect(200);
@@ -414,7 +439,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
         .send({ refreshToken: firstRefreshToken })
         .expect(401);
 
-      expect(reuseRes.body.message).toMatch(/Token reuse detected/);
+      expect(reuseRes.body.error.message).toMatch(/Token reuse detected/);
 
       // 4. Try rotating with the second refresh token -> also 401 because family was revoked!
       await request(app)
@@ -432,12 +457,12 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
     it("GET /api/auth/sessions lists active sessions for user", async () => {
       const login1 = await request(app)
         .post("/api/auth/token")
-        .send({ walletPublicKey: "G_MULTI_SESSION", deviceId: "device_1", deviceName: "Mac" })
+        .send({ walletPublicKey: testWallet(4), deviceId: "device_1", deviceName: "Mac" })
         .expect(200);
 
       await request(app)
         .post("/api/auth/token")
-        .send({ walletPublicKey: "G_MULTI_SESSION", deviceId: "device_2", deviceName: "Phone" })
+        .send({ walletPublicKey: testWallet(4), deviceId: "device_2", deviceName: "Phone" })
         .expect(200);
 
       const sessionsRes = await request(app)
@@ -452,7 +477,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
     it("POST /api/auth/revoke-all revokes all user sessions", async () => {
       const login = await request(app)
         .post("/api/auth/token")
-        .send({ walletPublicKey: "G_REVOKE_ALL", deviceId: "device_1" })
+        .send({ walletPublicKey: testWallet(5), deviceId: "device_1" })
         .expect(200);
 
       const revokeRes = await request(app)
@@ -473,7 +498,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
     it("GET /api/auth/audit-logs retrieves security audit events", async () => {
       const login = await request(app)
         .post("/api/auth/token")
-        .send({ walletPublicKey: "G_AUDIT_USER", deviceId: "device_1" })
+        .send({ walletPublicKey: testWallet(6), deviceId: "device_1" })
         .expect(200);
 
       const auditRes = await request(app)
@@ -510,6 +535,7 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
 
     it("falls back to static API_KEYS when token is not a JWT", (done) => {
       process.env.API_KEYS = "secret-api-key-123";
+      resetConfigForTests(); // pick up the env change (config is cached)
       const req = {
         headers: { authorization: `Bearer secret-api-key-123` },
       } as any;

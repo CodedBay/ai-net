@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod";
+import { StrKey } from "@stellar/stellar-base";
 
 /** Largest page a caller may request; keeps a single query bounded. */
 export const MAX_PAGE_SIZE = 100;
@@ -82,7 +83,9 @@ export const idParamSchema = z.object({ id: idSchema });
 /** A Stellar ed25519 public key (`G` followed by 55 base32 characters). */
 export const stellarPublicKeySchema = z
   .string()
-  .regex(/^G[A-Z2-7]{55}$/, "Must be a valid Stellar public key");
+  .refine(StrKey.isValidEd25519PublicKey, "Must be a valid Stellar public key");
+
+export const emptyBodySchema = z.object({}).strict();
 
 /**
  * Merge `paginationSchema` into `schema`.

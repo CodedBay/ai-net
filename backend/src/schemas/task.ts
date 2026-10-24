@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import { idParamSchema, sortSchema, withPagination } from "./common";
+import { idParamSchema, sortSchema, stellarPublicKeySchema, withPagination } from "./common";
 
 /**
  * Prompt ceiling, in characters.
@@ -55,9 +55,9 @@ export const promptSchema = z
  */
 export const createTaskSchema = z.object({
   prompt: promptSchema,
-  walletPublicKey: z.string().optional(),
-  maxBudgetXLM: z.number().min(0.1).optional().default(1),
-  agentPreferences: z.array(z.string()).optional(),
+  walletPublicKey: stellarPublicKeySchema.optional(),
+  maxBudgetXLM: z.number().min(0.1).max(1_000_000).optional().default(1),
+  agentPreferences: z.array(z.string().min(1).max(128)).max(20).optional(),
   priority: taskPrioritySchema.optional().default("normal"),
 });
 

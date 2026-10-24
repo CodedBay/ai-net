@@ -3,10 +3,25 @@
  *
  * Uses jest fake timers + global.fetch spy to avoid real network calls.
  */
+const mockWarn = jest.fn();
+jest.mock("../utils/logger", () => {
+  const stub: Record<string, unknown> = {
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    error: () => {},
+    fatal: () => {},
+    warn: (...args: unknown[]) => mockWarn(...args),
+  };
+  stub.child = () => stub;
+  return { createLogger: () => stub, default: stub };
+});
+
 import { HeartbeatClient } from "./heartbeat";
 
 beforeEach(() => {
   jest.useFakeTimers();
+  jest.clearAllMocks();
 });
 
 afterEach(() => {
@@ -132,8 +147,6 @@ describe("HeartbeatClient — send error handling", () => {
     jest
       .spyOn(global, "fetch" as any)
       .mockResolvedValue({ ok: false, status: 500 } as Response);
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
-
     const client = new HeartbeatClient({
       apiBaseUrl: "http://localhost:3001",
       agentId: "test-agent",
@@ -142,9 +155,8 @@ describe("HeartbeatClient — send error handling", () => {
 
     client.start();
     await Promise.resolve();
-    expect(warnSpy).toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalled();
     client.stop();
-    warnSpy.mockRestore();
   });
 
   it("URL-encodes agentId in the heartbeat endpoint", async () => {

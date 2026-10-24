@@ -90,8 +90,9 @@ mod types;
 pub use errors::Error;
 pub use types::{
     Auction, AuctionAbortedEvent, AuctionConfig, AuctionCreatedEvent, AuctionPhase,
-    BidRevealedEvent, BidSubmittedEvent, BidsRevealedEvent, ContractAwardedEvent, DataKey, Escrow,
-    SealedBid, COMMITMENT_DOMAIN, DEFAULT_BIDDING_DURATION_SECS, DEFAULT_REVEAL_DURATION_SECS,
+    BidRejectedBelowReserveEvent, BidRejectedOverBudgetEvent, BidRevealedEvent, BidSubmittedEvent,
+    BidsRevealedEvent, BondRefundClaimedEvent, ContractAwardedEvent, DataKey, Escrow, RefundClaimedEvent,
+    SealedBid, CLAIM_WINDOW_SECS, COMMITMENT_DOMAIN, DEFAULT_BIDDING_DURATION_SECS, DEFAULT_REVEAL_DURATION_SECS,
     MAX_BIDDERS, MAX_BID_PRICE, MAX_PHASE_DURATION_SECS, MAX_REPUTATION, MAX_TERMS_LEN,
     MIN_PHASE_DURATION_SECS, PRICE_WEIGHT, REPUTATION_WEIGHT, SCORE_SCALE,
 };
@@ -128,6 +129,16 @@ fn extend_ttl_batch(env: &Env, keys: &Vec<DataKey>) {
     for key in keys.iter() {
         extend_ttl_for_key(env, &key);
     }
+}
+
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::Unauthorized)?;
+    admin.require_auth();
+    Ok(admin)
 }
 
 /// Load an auction or fail with [`Error::NotFound`].
@@ -514,8 +525,32 @@ impl AgentBiddingContract {
             return Err(Error::InvalidCommitment);
         }
 
-        if price_stroops < auction.config.reserve_price || price_stroops > auction.config.max_price
-        {
+        if price_stroops > auction.config.max_price {
+            env.events().publish(
+                (symbol_short!("bidding"), Symbol::new(&env, "bid_rejected_over_budget")),
+                BidRejectedOverBudgetEvent {
+                    version: 1,
+                    task_id,
+                    bidder,
+                    bid_amount: price_stroops,
+                    max_budget: auction.config.max_price,
+                    ledger: env.ledger().sequence(),
+                },
+            );
+            return Err(Error::InvalidPrice);
+        }
+        if price_stroops < auction.config.reserve_price {
+            env.events().publish(
+                (symbol_short!("bidding"), Symbol::new(&env, "bid_rejected_below_reserve")),
+                BidRejectedBelowReserveEvent {
+                    version: 1,
+                    task_id,
+                    bidder,
+                    bid_amount: price_stroops,
+                    reserve_price: auction.config.reserve_price,
+                    ledger: env.ledger().sequence(),
+                },
+            );
             return Err(Error::InvalidPrice);
         }
 
